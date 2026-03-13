@@ -1,0 +1,374 @@
+{
+    "session_meta": {
+        "age_group": "18-30",
+        "drive_start_time": "2026-03-13T01:10:58.831599",
+        "personal_baseline_ear": 0.2,
+        "personal_baseline_mar": 0.46534765565615943
+    },
+    "events": [
+        {
+            "event_type": "yawn_detected",
+            "timestamp": "2026-03-13T01:11:12.028296",
+            "drive_minutes": 0.22,
+            "metric_value": 0.445,
+            "threshold_at_event": 0.465
+        },
+        {
+            "event_type": "yawn_detected",
+            "timestamp": "2026-03-13T01:11:36.435294",
+            "drive_minutes": 0.63,
+            "metric_value": 0.438,
+            "threshold_at_event": 0.465
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:11:48.750704",
+            "drive_minutes": 0.83,
+            "metric_value": 35.364,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:11:48.792108",
+            "drive_minutes": 0.83,
+            "metric_value": 27.86,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:11:48.832052",
+            "drive_minutes": 0.83,
+            "metric_value": 24.536,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:11:48.912513",
+            "drive_minutes": 0.83,
+            "metric_value": 21.72,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "eyes_closed",
+            "timestamp": "2026-03-13T01:11:50.473865",
+            "drive_minutes": 0.86,
+            "metric_value": 0.184,
+            "threshold_at_event": 0.2
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:11:50.677748",
+            "drive_minutes": 0.86,
+            "metric_value": 24.316,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:11:50.721364",
+            "drive_minutes": 0.86,
+            "metric_value": 21.397,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:11:50.764273",
+            "drive_minutes": 0.86,
+            "metric_value": 25.475,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:11:50.807508",
+            "drive_minutes": 0.87,
+            "metric_value": 21.011,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:11:52.677281",
+            "drive_minutes": 0.9,
+            "metric_value": 20.494,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:11:52.717994",
+            "drive_minutes": 0.9,
+            "metric_value": 23.721,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "yawn_detected",
+            "timestamp": "2026-03-13T01:11:57.962411",
+            "drive_minutes": 0.98,
+            "metric_value": 0.431,
+            "threshold_at_event": 0.465
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:02.883981",
+            "drive_minutes": 1.07,
+            "metric_value": 20.293,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:03.246623",
+            "drive_minutes": 1.07,
+            "metric_value": 23.351,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:03.364978",
+            "drive_minutes": 1.07,
+            "metric_value": 24.95,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:03.403991",
+            "drive_minutes": 1.08,
+            "metric_value": 22.502,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:03.446608",
+            "drive_minutes": 1.08,
+            "metric_value": 22.502,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:03.936693",
+            "drive_minutes": 1.08,
+            "metric_value": 20.261,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.014523",
+            "drive_minutes": 1.09,
+            "metric_value": 21.202,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.057243",
+            "drive_minutes": 1.09,
+            "metric_value": 20.161,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.099374",
+            "drive_minutes": 1.09,
+            "metric_value": 22.69,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.141896",
+            "drive_minutes": 1.09,
+            "metric_value": 20.668,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.183333",
+            "drive_minutes": 1.09,
+            "metric_value": 20.668,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.225320",
+            "drive_minutes": 1.09,
+            "metric_value": 20.256,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.266524",
+            "drive_minutes": 1.09,
+            "metric_value": 21.119,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.351690",
+            "drive_minutes": 1.09,
+            "metric_value": 21.867,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.431429",
+            "drive_minutes": 1.09,
+            "metric_value": 21.527,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.471442",
+            "drive_minutes": 1.09,
+            "metric_value": 21.103,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.512630",
+            "drive_minutes": 1.09,
+            "metric_value": 21.103,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:04.961874",
+            "drive_minutes": 1.1,
+            "metric_value": 21.01,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.002511",
+            "drive_minutes": 1.1,
+            "metric_value": 20.171,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.040518",
+            "drive_minutes": 1.1,
+            "metric_value": 20.003,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.079349",
+            "drive_minutes": 1.1,
+            "metric_value": 20.24,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.119893",
+            "drive_minutes": 1.1,
+            "metric_value": 20.611,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.161276",
+            "drive_minutes": 1.1,
+            "metric_value": 22.719,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.202759",
+            "drive_minutes": 1.11,
+            "metric_value": 22.472,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.243788",
+            "drive_minutes": 1.11,
+            "metric_value": 22.427,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.284989",
+            "drive_minutes": 1.11,
+            "metric_value": 24.402,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.365648",
+            "drive_minutes": 1.11,
+            "metric_value": 20.732,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.404664",
+            "drive_minutes": 1.11,
+            "metric_value": 21.638,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.446518",
+            "drive_minutes": 1.11,
+            "metric_value": 22.007,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.489110",
+            "drive_minutes": 1.11,
+            "metric_value": 22.21,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.529202",
+            "drive_minutes": 1.11,
+            "metric_value": 23.554,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.572262",
+            "drive_minutes": 1.11,
+            "metric_value": 22.281,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:05.615113",
+            "drive_minutes": 1.11,
+            "metric_value": 24.536,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:06.121625",
+            "drive_minutes": 1.12,
+            "metric_value": 24.962,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:06.163012",
+            "drive_minutes": 1.12,
+            "metric_value": 23.853,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "eyes_closed",
+            "timestamp": "2026-03-13T01:12:06.163060",
+            "drive_minutes": 1.12,
+            "metric_value": 0.195,
+            "threshold_at_event": 0.2
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:06.205228",
+            "drive_minutes": 1.12,
+            "metric_value": 22.841,
+            "threshold_at_event": 20.0
+        },
+        {
+            "event_type": "distracted",
+            "timestamp": "2026-03-13T01:12:06.246384",
+            "drive_minutes": 1.12,
+            "metric_value": 20.379,
+            "threshold_at_event": 20.0
+        }
+    ]
+}

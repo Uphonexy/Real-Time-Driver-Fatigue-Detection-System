@@ -2,18 +2,17 @@ import cv2
 import dlib
 import imutils
 import time
-import threading
 from pygame import mixer
 from imutils import face_utils
 
 # Import separated modules
 from detector import get_head_pose, eye_aspect_ratio, mouth_aspect_ratio, line_pairs
-from thresholds import compute_adaptive_threshold
+from thresholds import compute_adaptive_threshold, compute_adaptive_mar_threshold
 from calibration import run_calibration_phase
 from alarms import (
-    sound_eyes_closed_alarm, 
-    sound_yawning_alarm, 
-    sound_head_down_alarm, 
+    sound_eyes_closed_alarm,
+    sound_yawning_alarm,
+    sound_head_down_alarm,
     sound_distracted_alarm
 )
 from logger import SessionLogger
@@ -32,7 +31,7 @@ predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
 (mStart, mEnd) = face_utils.FACIAL_LANDMARKS_IDXS["mouth"]
 
 print("[INFO] Starting video stream...")
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
 if not cap.isOpened():
     print("[ERROR] Could not open camera.")
@@ -43,21 +42,37 @@ if not cap.isOpened():
 # ──────────────────────────────────────────────
 age_group, drive_start_time = run_calibration_phase(cap)
 
+# ──────────────────────────────────────────────
 # Threshold & System State Initialization
-personal_baseline_ear = 0.25 # Initial fallback
-personal_baseline_mar = 0.75
-EYE_AR_THRESH = personal_baseline_ear 
-MOU_AR_THRESH = personal_baseline_mar 
+# ──────────────────────────────────────────────
+personal_baseline_ear = 0.25
+personal_baseline_mar = 0.65
 
-EYE_AR_CONSEC_FRAMES = 45   
-HEAD_PITCH_THRESH = 10      
+# FIX A: Raised hardcoded fallback from 0.21 → 0.24
+# Your face's closed-eye EAR (~0.25) was above the old 0.21 threshold,
+# so "Eyes Closed" was never being detected.
+EYE_AR_THRESH = 0.24
+MOU_AR_THRESH = personal_baseline_mar
+
+HEAD_PITCH_THRESH = 10
 DISTRACTION_YAW_THRESH = 20
 
-last_threshold_update = -1800 
+last_threshold_update = -1800
 
-COUNTER = 0
+# Time-based eye closure tracking
+eye_closed_start_time = None
+EYE_CLOSED_DURATION_THRESH = 1.5  # seconds — must be closed this long to trigger
+eye_event_logged = False
+
+# Sustained yawn detection
+yawn_start_time = None
+YAWN_DURATION_THRESH = 1.5  # seconds — must be open this long to count as yawn
+yawn_counted_this_open = False
 yawnStatus = False
 yawns = 0
+
+# Face-loss counter
+no_face_counter = 0
 
 # ──────────────────────────────────────────────
 # Session Logging & Calibration Initialization
@@ -66,161 +81,233 @@ logger = SessionLogger(age_group)
 
 calibration_mode = True
 ear_samples = []
+mar_samples = []
+open_eye_avg = 0.0  # initialized to prevent NameError
 calibration_end_time = 0
-calibration_duration = 300 # seconds
+calibration_duration = 10  # seconds (5 minutes) — change to 10 for quick testing
 
 # ──────────────────────────────────────────────
 # Main Detection Loop
 # ──────────────────────────────────────────────
 print("[INFO] Running... Press 'q' to quit.")
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        print("[ERROR] Could not read frame.")
-        break
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("[ERROR] Could not read frame.")
+            break
 
-    frame = imutils.resize(frame, width=640)
+        frame = imutils.resize(frame, width=640)
+        frame_height, frame_width = frame.shape[:2]
 
-    drive_minutes = (time.time() - drive_start_time) / 60
-    hours = int(drive_minutes // 60)
-    minutes = int(drive_minutes % 60)
-    cv2.putText(frame, f"Drive Time: {hours:02d}:{minutes:02d}", (450, 460), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        drive_minutes = (time.time() - drive_start_time) / 60
+        hours = int(drive_minutes // 60)
+        minutes = int(drive_minutes % 60)
+        cv2.putText(frame, f"Drive Time: {hours:02d}:{minutes:02d}",
+                    (450, 460), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-    # ── Adaptive Threshold Update ──
-    current_drive_seconds = time.time() - drive_start_time
-    
-    if calibration_mode:
-        remaining_time = int(calibration_duration - current_drive_seconds)
-        if remaining_time > 0:
-            cv2.putText(frame, f"CALIBRATING - Drive normally", (10, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-            cv2.putText(frame, f"Calibrating: {remaining_time // 60}:{remaining_time % 60:02d} remaining", (10, 460), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-        else:
-            calibration_mode = False
-            calibration_end_time = time.time()
-            if ear_samples:
-                ear_samples.sort(reverse=True)
-                top_70_percent_index = int(len(ear_samples) * 0.7)
-                valid_samples = ear_samples[:top_70_percent_index]
-                if valid_samples:
-                    open_eye_avg = sum(valid_samples) / len(valid_samples)
-                    personal_baseline_ear = max(0.20, open_eye_avg - 0.08)
-                    logger.update_baseline(personal_baseline_ear)
-                    
-            print(f"[INFO] Calibration Complete. Open Eye Avg: {open_eye_avg:.3f}, Base Alert EAR: {personal_baseline_ear:.3f}")
-            last_threshold_update = -1800
-            
-    if not calibration_mode and time.time() - calibration_end_time < 5:
-        cv2.putText(frame, f"Calibration Complete - Baseline EAR: {personal_baseline_ear:.3f}", (10, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        current_drive_seconds = time.time() - drive_start_time
 
-    if not calibration_mode and current_drive_seconds - last_threshold_update >= 1800:
-        EYE_AR_THRESH = compute_adaptive_threshold(personal_baseline_ear, age_group, drive_minutes)
-        MOU_AR_THRESH = compute_adaptive_threshold(personal_baseline_mar, age_group, drive_minutes)
-        last_threshold_update = current_drive_seconds
-        
-    cv2.putText(frame, f"EAR Thresh: {EYE_AR_THRESH:.3f}", (450, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    prev_yawn_status = yawnStatus
-
-    rects = detector(gray, 0)
-
-    for rect in rects:
-        shape = predictor(gray, rect)
-        shape = face_utils.shape_to_np(shape)
-
-        leftEye  = shape[lStart:lEnd]
-        rightEye = shape[rStart:rEnd]
-        mouth    = shape[mStart:mEnd]
-
-        leftEAR  = eye_aspect_ratio(leftEye)
-        rightEAR = eye_aspect_ratio(rightEye)
-        ear      = (leftEAR + rightEAR) / 2.0
-        mouEAR   = mouth_aspect_ratio(mouth)
-        
+        # ── Calibration Phase ──
         if calibration_mode:
-            ear_samples.append(ear)
+            remaining_time = int(calibration_duration - current_drive_seconds)
+            if remaining_time > 0:
+                cv2.putText(frame, "CALIBRATING - Sit normally, keep eyes open",
+                            (10, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                cv2.putText(frame, f"Calibrating: {remaining_time // 60}:{remaining_time % 60:02d} remaining",
+                            (10, 460), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            else:
+                calibration_mode = False
+                calibration_end_time = time.time()
 
-        reprojectdst, euler_angle = get_head_pose(shape)
+                # EAR calibration — use top 70% of samples (open-eye values)
+                if ear_samples:
+                    ear_samples.sort(reverse=True)
+                    top_70 = ear_samples[:int(len(ear_samples) * 0.7)]
+                    if top_70:
+                        open_eye_avg = sum(top_70) / len(top_70)
+                        # FIX: reduced offset from 0.08 → 0.05 so threshold
+                        # sits closer to the real open-eye EAR.
+                        # Raised floor from 0.20 → 0.22 as a safer minimum.
+                        personal_baseline_ear = max(0.22, open_eye_avg - 0.05)
+                        # Apply immediately so detection works right after calibration
+                        EYE_AR_THRESH = personal_baseline_ear
+                        logger.update_baseline(personal_baseline_ear)
 
-        for (x, y) in shape:
-            cv2.circle(frame, (x, y), 1, (0, 0, 255), -1)
+                # MAR calibration — use bottom 70% of samples (resting mouth values)
+                if mar_samples:
+                    mar_samples.sort()
+                    bottom_70 = mar_samples[:int(len(mar_samples) * 0.7)]
+                    if bottom_70:
+                        closed_mouth_avg = sum(bottom_70) / len(bottom_70)
+                        personal_baseline_mar = closed_mouth_avg + 0.10
+                        MOU_AR_THRESH = personal_baseline_mar
+                        logger.update_baseline_mar(personal_baseline_mar)
 
-        for start, end in line_pairs:
-            start_point = tuple(map(int, reprojectdst[start]))
-            end_point   = tuple(map(int, reprojectdst[end]))
-            cv2.line(frame, start_point, end_point, (0, 0, 255))
+                print(f"[INFO] Calibration Complete.")
+                print(f"       Open Eye Avg:   {open_eye_avg:.3f}")
+                print(f"       EAR Threshold:  {EYE_AR_THRESH:.3f}  (if EAR drops below this → eyes closed)")
+                print(f"       MAR Threshold:  {MOU_AR_THRESH:.3f}")
+                last_threshold_update = -1800
 
-        xx = euler_angle[0, 0]
-        yy = euler_angle[1, 0]
-        zz = euler_angle[2, 0]
-        cv2.putText(frame, f"X: {xx:7.2f}", (20, 420), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 0), 2)
-        cv2.putText(frame, f"Y: {yy:7.2f}", (20, 445), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 0), 2)
-        cv2.putText(frame, f"Z: {zz:7.2f}", (20, 470), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 0), 2)
+        # ── Show calibration complete message for 5 seconds ──
+        if not calibration_mode and time.time() - calibration_end_time < 5:
+            cv2.putText(frame, f"Calibration Complete! EAR Thresh: {EYE_AR_THRESH:.3f}",
+                        (10, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
 
-        # ── Head Pose Check ──
-        if xx > HEAD_PITCH_THRESH:
-            cv2.putText(frame, "Head Down", (10, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            if not calibration_mode:
-                threading.Thread(name='sound_head_down_alarm', target=sound_head_down_alarm).start()
-                logger.log_event("head_down", drive_minutes, xx, HEAD_PITCH_THRESH)
+        # ── Adaptive Threshold Update every 30 mins ──
+        if not calibration_mode and current_drive_seconds - last_threshold_update >= 1800:
+            EYE_AR_THRESH = compute_adaptive_threshold(personal_baseline_ear, age_group, drive_minutes)
+            MOU_AR_THRESH = compute_adaptive_mar_threshold(personal_baseline_mar, age_group, drive_minutes)
+            last_threshold_update = current_drive_seconds
 
-        # ── Distraction Check (Y Euler angle) ──
-        if abs(yy) > DISTRACTION_YAW_THRESH:
-            cv2.putText(frame, "DISTRACTED", (10, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2) # Orange
-            if not calibration_mode:
-                threading.Thread(name='sound_distracted_alarm', target=sound_distracted_alarm).start()
-                logger.log_event("distracted", drive_minutes, yy, DISTRACTION_YAW_THRESH)
+        # ── Always show thresholds on HUD ──
+        cv2.putText(frame, f"EAR Thresh: {EYE_AR_THRESH:.3f}",
+                    (450, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        # ── Eye Closure Check ──
-        if ear < EYE_AR_THRESH:
-            cv2.putText(frame, "Eyes Closed", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            if not calibration_mode:
-                if COUNTER == 0: 
-                    logger.log_event("eyes_closed", drive_minutes, ear, EYE_AR_THRESH)
-                COUNTER += 1
-                
-            if COUNTER >= EYE_AR_CONSEC_FRAMES and not calibration_mode:
-                cv2.putText(frame, "DROWSINESS ALERT!", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                threading.Thread(name='sound_eyes_closed_alarm', target=sound_eyes_closed_alarm).start()
-                if COUNTER == EYE_AR_CONSEC_FRAMES: 
-                    logger.log_event("drowsiness_alarm", drive_minutes, ear, EYE_AR_THRESH)
-                COUNTER = 0 # Prevent spam triggered alarms and force reset
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        rects = detector(gray, 0)
+
+        # ── Face-loss warning ──
+        if len(rects) == 0:
+            no_face_counter += 1
+            if no_face_counter > 90:
+                cv2.putText(frame, "FACE NOT DETECTED - Monitoring Paused",
+                            (10, 300), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
         else:
-            COUNTER = 0
-            cv2.putText(frame, "Eyes Open", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            no_face_counter = 0
 
-        cv2.putText(frame, f"EAR: {ear:.2f}", (480, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        for rect in rects:
+            shape = predictor(gray, rect)
+            shape = face_utils.shape_to_np(shape)
 
-        # ── Yawning Check ──
-        if mouEAR > MOU_AR_THRESH:
-            cv2.putText(frame, "Yawning", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            yawnStatus = True
-            cv2.putText(frame, f"Yawn Count: {yawns + 1}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-        else:
-            yawnStatus = False
+            leftEye  = shape[lStart:lEnd]
+            rightEye = shape[rStart:rEnd]
+            mouth    = shape[mStart:mEnd]
 
-        if prev_yawn_status and not yawnStatus:
-            yawns += 1
+            leftEAR  = eye_aspect_ratio(leftEye)
+            rightEAR = eye_aspect_ratio(rightEye)
+            ear      = (leftEAR + rightEAR) / 2.0
+            mouEAR   = mouth_aspect_ratio(mouth)
 
-        if yawns > 2:
-            cv2.putText(frame, "DROWSINESS ALERT!", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            if not calibration_mode:
-                threading.Thread(name='sound_yawning_alarm', target=sound_yawning_alarm).start()
-                logger.log_event("yawn_detected", drive_minutes, mouEAR, MOU_AR_THRESH)
-            yawns = 0
+            # Collect samples during calibration
+            if calibration_mode:
+                ear_samples.append(ear)
+                mar_samples.append(mouEAR)
 
-        cv2.putText(frame, f"MAR: {mouEAR:.2f}", (480, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            reprojectdst, euler_angle = get_head_pose(shape, frame_width, frame_height)
 
-    cv2.imshow("Driver Fatigue Detection", frame)
+            # Draw facial landmarks
+            for (x, y) in shape:
+                cv2.circle(frame, (x, y), 1, (0, 0, 255), -1)
 
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
+            # Draw head pose box
+            for start, end in line_pairs:
+                cv2.line(frame,
+                         tuple(map(int, reprojectdst[start])),
+                         tuple(map(int, reprojectdst[end])),
+                         (0, 0, 255))
 
-# ── Cleanup & Logging ──
-cap.release()
-cv2.destroyAllWindows()
-print("[INFO] Stream ended.")
+            xx = euler_angle[0, 0]
+            yy = euler_angle[1, 0]
+            zz = euler_angle[2, 0]
+            cv2.putText(frame, f"X: {xx:7.2f}", (20, 420), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
+            cv2.putText(frame, f"Y: {yy:7.2f}", (20, 445), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
+            cv2.putText(frame, f"Z: {zz:7.2f}", (20, 470), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
 
-total_drive_time = round((time.time() - drive_start_time) / 60, 2)
-logger.save_and_print_summary(total_drive_time)
+            # ── Head Pose Check ──
+            if xx > HEAD_PITCH_THRESH:
+                cv2.putText(frame, "HEAD DOWN", (10, 130),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                if not calibration_mode:
+                    sound_head_down_alarm()
+                    logger.log_event("head_down", drive_minutes, xx, HEAD_PITCH_THRESH)
+
+            # ── Distraction Check ──
+            if abs(yy) > DISTRACTION_YAW_THRESH:
+                cv2.putText(frame, "DISTRACTED", (10, 160),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
+                if not calibration_mode:
+                    sound_distracted_alarm()
+                    logger.log_event("distracted", drive_minutes, yy, DISTRACTION_YAW_THRESH)
+
+            # ── Eye Closure Check ──
+            if ear < EYE_AR_THRESH:
+                cv2.putText(frame, "Eyes Closed", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                if not calibration_mode:
+                    if eye_closed_start_time is None:
+                        eye_closed_start_time = time.time()
+                    elapsed = time.time() - eye_closed_start_time
+
+                    # Show live countdown timer on screen
+                    cv2.putText(frame, f"Eye closed: {elapsed:.1f}s / {EYE_CLOSED_DURATION_THRESH}s",
+                                (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+
+                    if elapsed >= EYE_CLOSED_DURATION_THRESH:
+                        cv2.putText(frame, "DROWSINESS ALERT!", (10, 55),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                        sound_eyes_closed_alarm()
+                        if not eye_event_logged:
+                            logger.log_event("drowsiness_alarm", drive_minutes, ear, EYE_AR_THRESH)
+                            eye_event_logged = True
+            else:
+                # Eyes are open — reset all closure tracking
+                eye_closed_start_time = None
+                eye_event_logged = False
+                cv2.putText(frame, "Eyes Open", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+            # ── Live EAR readout ──
+            cv2.putText(frame, f"EAR: {ear:.3f}", (480, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
+            cv2.putText(frame, f"T: {EYE_AR_THRESH:.3f}", (480, 52),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 0), 2)
+
+            # ── Yawning Check ──
+            if mouEAR > MOU_AR_THRESH:
+                cv2.putText(frame, "Yawning...", (10, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                if yawn_start_time is None:
+                    yawn_start_time = time.time()
+                if time.time() - yawn_start_time >= YAWN_DURATION_THRESH:
+                    yawnStatus = True
+                    if not yawn_counted_this_open:
+                        yawn_counted_this_open = True
+            else:
+                if yawnStatus:
+                    yawns += 1
+                    yawnStatus = False
+                yawn_start_time = None
+                yawn_counted_this_open = False
+
+            # Show yawn count on HUD
+            if yawns > 0:
+                cv2.putText(frame, f"Yawns: {yawns}/3", (10, 100),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 165, 0), 2)
+
+            if yawns >= 3:
+                cv2.putText(frame, "DROWSINESS ALERT!", (10, 55),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                if not calibration_mode:
+                    sound_yawning_alarm()
+                    logger.log_event("yawn_detected", drive_minutes, mouEAR, MOU_AR_THRESH)
+                yawns = 0
+
+            # ── Live MAR readout ──
+            cv2.putText(frame, f"MAR: {mouEAR:.3f}", (480, 75),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
+
+        cv2.imshow("Driver Fatigue Detection", frame)
+
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+
+finally:
+    if cap.isOpened():
+        cap.release()
+    cv2.destroyAllWindows()
+    print("[INFO] Stream ended.")
+    total_drive_time = round((time.time() - drive_start_time) / 60, 2)
+    logger.save_and_print_summary(total_drive_time)

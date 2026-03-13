@@ -2,18 +2,6 @@ import cv2
 import numpy as np
 from scipy.spatial import distance as dist
 
-# ──────────────────────────────────────────────
-# Head Pose: Camera Matrix & Distortion Coefficients
-# (calibrated for 640x480 resolution)
-# ──────────────────────────────────────────────
-K = [6.5308391993466671e+002, 0.0, 3.1950000000000000e+002,
-     0.0, 6.5308391993466671e+002, 2.3950000000000000e+002,
-     0.0, 0.0, 1.0]
-D = [7.0834633684407095e-002, 6.9140193737175351e-002, 0.0, 0.0, -1.3073460323689292e+000]
-
-cam_matrix = np.array(K).reshape(3, 3).astype(np.float32)
-dist_coeffs = np.array(D).reshape(5, 1).astype(np.float32)
-
 # 3D model points for head pose
 object_pts = np.float32([
     [6.825897,  6.760612,  4.402142],
@@ -49,8 +37,23 @@ line_pairs = [
     [0, 4], [1, 5], [2, 6], [3, 7]
 ]
 
-def get_head_pose(shape):
+# FIX 7: Scale the camera matrix based on actual frame dimensions
+def get_head_pose(shape, frame_width, frame_height):
     """Estimate head pose using PnP and return reprojected points + Euler angles."""
+    fx = 653.08 * (frame_width / 640.0)
+    fy = fx
+    cx = frame_width / 2.0
+    cy = frame_height / 2.0
+    
+    K = [fx, 0.0, cx,
+         0.0, fy, cy,
+         0.0, 0.0, 1.0]
+
+    D = [7.0834633684407095e-002, 6.9140193737175351e-002, 0.0, 0.0, -1.3073460323689292e+000]
+
+    cam_matrix = np.array(K).reshape(3, 3).astype(np.float32)
+    dist_coeffs = np.array(D).reshape(5, 1).astype(np.float32)
+
     image_pts = np.float32([
         shape[17], shape[21], shape[22], shape[26],
         shape[36], shape[39], shape[42], shape[45],

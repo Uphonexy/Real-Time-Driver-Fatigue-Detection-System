@@ -7,11 +7,16 @@ class SessionLogger:
         self.session_meta = {
             "age_group": age_group,
             "drive_start_time": datetime.now().isoformat(),
-            "personal_baseline_ear": None
+            "personal_baseline_ear": None,
+            "personal_baseline_mar": None # FIX 5: MAR calibration from samples
         }
 
     def update_baseline(self, baseline):
         self.session_meta["personal_baseline_ear"] = baseline
+
+    # FIX 5: Update MAR baseline in logger
+    def update_baseline_mar(self, baseline_mar):
+        self.session_meta["personal_baseline_mar"] = baseline_mar
 
     def log_event(self, event_type, drive_minutes, metric_value, threshold_at_event):
         self.session_log.append({
@@ -44,6 +49,7 @@ class SessionLogger:
         print(f"Age Group:             {self.session_meta['age_group']}")
         print(f"Total Drive Time:      {total_drive_time} mins")
         print(f"Baseline EAR:          {self.session_meta['personal_baseline_ear']}")
+        print(f"Baseline MAR:          {self.session_meta['personal_baseline_mar']}") # FIX 5: Display MAR baseline
         print(f"\n--- Events ---")
         print(f"Eyes Closed Events:    {eyes_closed_count}")
         print(f"Head Down Alerts:      {head_downs}")

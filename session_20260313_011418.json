@@ -1,0 +1,52 @@
+{
+    "session_meta": {
+        "age_group": "31-45",
+        "drive_start_time": "2026-03-13T01:13:32.762793",
+        "personal_baseline_ear": 0.2,
+        "personal_baseline_mar": 0.4691283010728158
+    },
+    "events": [
+        {
+            "event_type": "yawn_detected",
+            "timestamp": "2026-03-13T01:13:54.692277",
+            "drive_minutes": 0.36,
+            "metric_value": 0.413,
+            "threshold_at_event": 0.434
+        },
+        {
+            "event_type": "yawn_detected",
+            "timestamp": "2026-03-13T01:13:56.232554",
+            "drive_minutes": 0.39,
+            "metric_value": 0.427,
+            "threshold_at_event": 0.434
+        },
+        {
+            "event_type": "yawn_detected",
+            "timestamp": "2026-03-13T01:14:01.311770",
+            "drive_minutes": 0.48,
+            "metric_value": 0.433,
+            "threshold_at_event": 0.434
+        },
+        {
+            "event_type": "yawn_detected",
+            "timestamp": "2026-03-13T01:14:05.490225",
+            "drive_minutes": 0.54,
+            "metric_value": 0.424,
+            "threshold_at_event": 0.434
+        },
+        {
+            "event_type": "yawn_detected",
+            "timestamp": "2026-03-13T01:14:08.173760",
+            "drive_minutes": 0.59,
+            "metric_value": 0.394,
+            "threshold_at_event": 0.434
+        },
+        {
+            "event_type": "eyes_closed",
+            "timestamp": "2026-03-13T01:14:11.219050",
+            "drive_minutes": 0.64,
+            "metric_value": 0.21,
+            "threshold_at_event": 0.216
+        }
+    ]
+}
