@@ -1,0 +1,31 @@
+{
+    "session_meta": {
+        "age_group": "18-30",
+        "drive_start_time": "2026-03-13T12:01:39.258593",
+        "personal_baseline_ear": 0.2327068670061363,
+        "personal_baseline_mar": 0.3888280707165592
+    },
+    "events": [
+        {
+            "event_type": "drowsiness_alarm",
+            "timestamp": "2026-03-13T12:02:13.481904",
+            "drive_minutes": 0.57,
+            "metric_value": 0.227,
+            "threshold_at_event": 0.233
+        },
+        {
+            "event_type": "drowsiness_alarm",
+            "timestamp": "2026-03-13T12:02:17.245863",
+            "drive_minutes": 0.63,
+            "metric_value": 0.173,
+            "threshold_at_event": 0.233
+        },
+        {
+            "event_type": "yawn_detected",
+            "timestamp": "2026-03-13T12:02:34.208953",
+            "drive_minutes": 0.92,
+            "metric_value": 0.381,
+            "threshold_at_event": 0.389
+        }
+    ]
+}

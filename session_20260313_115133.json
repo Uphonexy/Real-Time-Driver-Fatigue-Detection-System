@@ -1,0 +1,87 @@
+{
+    "session_meta": {
+        "age_group": "31-45",
+        "drive_start_time": "2026-03-13T11:50:20.093142",
+        "personal_baseline_ear": 0.23478407866269052,
+        "personal_baseline_mar": 0.39176846035714596
+    },
+    "events": [
+        {
+            "event_type": "head_down",
+            "timestamp": "2026-03-13T11:50:57.999961",
+            "drive_minutes": 0.63,
+            "metric_value": 11.024,
+            "threshold_at_event": 10.0
+        },
+        {
+            "event_type": "head_down",
+            "timestamp": "2026-03-13T11:50:58.072347",
+            "drive_minutes": 0.63,
+            "metric_value": 12.224,
+            "threshold_at_event": 10.0
+        },
+        {
+            "event_type": "head_down",
+            "timestamp": "2026-03-13T11:50:58.133000",
+            "drive_minutes": 0.63,
+            "metric_value": 12.816,
+            "threshold_at_event": 10.0
+        },
+        {
+            "event_type": "head_down",
+            "timestamp": "2026-03-13T11:50:58.192710",
+            "drive_minutes": 0.63,
+            "metric_value": 12.874,
+            "threshold_at_event": 10.0
+        },
+        {
+            "event_type": "head_down",
+            "timestamp": "2026-03-13T11:50:58.252472",
+            "drive_minutes": 0.64,
+            "metric_value": 13.764,
+            "threshold_at_event": 10.0
+        },
+        {
+            "event_type": "head_down",
+            "timestamp": "2026-03-13T11:50:58.636728",
+            "drive_minutes": 0.64,
+            "metric_value": 15.602,
+            "threshold_at_event": 10.0
+        },
+        {
+            "event_type": "head_down",
+            "timestamp": "2026-03-13T11:50:58.764260",
+            "drive_minutes": 0.64,
+            "metric_value": 11.918,
+            "threshold_at_event": 10.0
+        },
+        {
+            "event_type": "yawn_detected",
+            "timestamp": "2026-03-13T11:51:13.994335",
+            "drive_minutes": 0.9,
+            "metric_value": 0.343,
+            "threshold_at_event": 0.363
+        },
+        {
+            "event_type": "drowsiness_alarm",
+            "timestamp": "2026-03-13T11:51:21.725934",
+            "drive_minutes": 1.03,
+            "metric_value": 0.179,
+            "threshold_at_event": 0.254
+        },
+        {
+            "event_type": "drowsiness_alarm",
+            "timestamp": "2026-03-13T11:51:25.081625",
+            "drive_minutes": 1.08,
+            "metric_value": 0.164,
+            "threshold_at_event": 0.254
+        },
+        {
+            "event_type": "drowsiness_alarm",
+            "timestamp": "2026-03-13T11:51:31.421933",
+            "drive_minutes": 1.19,
+            "metric_value": 0.226,
+            "threshold_at_event": 0.254
+        }
+    ]
+}
