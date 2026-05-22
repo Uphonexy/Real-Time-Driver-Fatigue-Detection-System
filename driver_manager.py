@@ -48,7 +48,7 @@ def run_driver_setup() -> tuple[int, str, str]:
 
     root = tk.Tk()
     root.title("WAKEMATE — Driver Setup")
-    root.geometry("420x420")
+    root.geometry("400x350")
     root.configure(bg=C_BG)
     root.resizable(False, False)
     root.eval("tk::PlaceWindow . center")

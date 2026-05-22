@@ -159,7 +159,7 @@ def camera_thread_func(driver_id, driver_name, age_group, drive_start_time, sess
     mar_samples = []
     open_eye_avg = 0.0
     calibration_end_time = 0
-    calibration_duration = 30
+    calibration_duration = 300  # BUG FIX: 5 minutes, matching main.py
     alert_clear_time = 0
 
     # Clip recorder

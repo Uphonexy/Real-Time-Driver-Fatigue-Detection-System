@@ -16,3 +16,8 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime-generated data (never commit)
+fatigue.db
+clips/
+session_*.json
