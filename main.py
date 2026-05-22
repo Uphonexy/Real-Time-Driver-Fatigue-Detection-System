@@ -3,13 +3,13 @@ import dlib
 import imutils
 import time
 import sys
+from datetime import datetime
 from pygame import mixer
 from imutils import face_utils
 
 # Import separated modules
 from detector import get_head_pose, eye_aspect_ratio, mouth_aspect_ratio, line_pairs
 from thresholds import compute_adaptive_threshold, compute_adaptive_mar_threshold
-from calibration import run_calibration_phase
 from alarms import (
     sound_eyes_closed_alarm,
     sound_yawning_alarm,
@@ -17,6 +17,12 @@ from alarms import (
     sound_distracted_alarm
 )
 from logger import SessionLogger
+
+# ── New modules ────────────────────────────────────────────────────────────
+from database import init_db, create_session
+from driver_manager import run_driver_setup
+from clip_recorder import ClipRecorder
+from analytics import compute_risk_score
 
 # ──────────────────────────────────────────────
 # Initialization
@@ -60,7 +66,7 @@ def open_camera():
             cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             cap.set(cv2.CAP_PROP_FPS,          30)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)   
+            cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
 
             time.sleep(3.0)
 
@@ -88,9 +94,19 @@ def open_camera():
 cap = open_camera()
 
 # ──────────────────────────────────────────────
-# Pre-Detection Input Screen
+# Clip Recorder (initialised right after camera)
 # ──────────────────────────────────────────────
-age_group, drive_start_time = run_calibration_phase(cap)
+clip_recorder = ClipRecorder()
+
+# ──────────────────────────────────────────────
+# Driver Setup & Database Initialisation
+# ──────────────────────────────────────────────
+init_db()
+driver_id, driver_name, age_group = run_driver_setup()
+drive_start_time = time.time()
+session_id = create_session(driver_id, age_group, datetime.now().isoformat())
+
+print(f"[INFO] Driver: {driver_name}  |  Age Group: {age_group}  |  Session ID: {session_id}")
 
 # ──────────────────────────────────────────────
 # Threshold & System State Initialization
@@ -101,19 +117,19 @@ personal_baseline_mar = 0.65
 EYE_AR_THRESH = 0.24
 MOU_AR_THRESH = personal_baseline_mar
 
-HEAD_PITCH_THRESH      = 10   
-DISTRACTION_YAW_THRESH = 20   
+HEAD_PITCH_THRESH      = 10
+DISTRACTION_YAW_THRESH = 20
 
-last_threshold_update = -1800  
+last_threshold_update = -1800
 
 # ── Eye closure tracking ──
 eye_closed_start_time      = None
-EYE_CLOSED_DURATION_THRESH = 1.5   
+EYE_CLOSED_DURATION_THRESH = 1.5
 eye_event_logged           = False
 
 # ── Yawn tracking ──
 yawn_start_time        = None
-YAWN_DURATION_THRESH   = 1.5   
+YAWN_DURATION_THRESH   = 1.5
 yawn_counted_this_open = False
 yawnStatus             = False
 yawns                  = 0
@@ -127,7 +143,7 @@ total_paused_seconds = 0.0
 pause_start_time = None
 
 # BUG 3 FIXED: ── Event log spam prevention cooldowns ──
-last_head_down_log = 0.0
+last_head_down_log  = 0.0
 last_distracted_log = 0.0
 LOG_COOLDOWN = 3.0
 
@@ -135,11 +151,13 @@ LOG_COOLDOWN = 3.0
 # Session Logger & Calibration Setup
 # ──────────────────────────────────────────────
 logger = SessionLogger(age_group)
+if session_id is not None:
+    logger.set_session_id(session_id)
 
 calibration_mode     = True
 ear_samples          = []
 mar_samples          = []
-open_eye_avg         = 0.0   
+open_eye_avg         = 0.0
 calibration_end_time = 0
 calibration_duration = 300    # BUG 4 FIXED: seconds — 5 minutes for production use
 
@@ -161,7 +179,7 @@ def read_frame_safe(cap, retries=3):
 print("[INFO] Running... Press 'q' to quit.")
 
 consecutive_failures     = 0
-MAX_CONSECUTIVE_FAILURES = 30  
+MAX_CONSECUTIVE_FAILURES = 30
 
 try:
     while True:
@@ -173,13 +191,13 @@ try:
                 break
             continue
 
-        consecutive_failures = 0  
+        consecutive_failures = 0
 
         frame = imutils.resize(frame, width=640)
         frame_height, frame_width = frame.shape[:2]
 
         current_time = time.time()
-        
+
         # BUG 2 FIXED: Calculate active time minus any elapsed pause hours
         active_time = current_time - drive_start_time - total_paused_seconds
         if paused and pause_start_time is not None:
@@ -191,9 +209,26 @@ try:
         minutes = int(drive_minutes % 60)
         cv2.putText(frame, f"Drive Time: {hours:02d}:{minutes:02d}",
                     (450, 460), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
+
         # BUG 5 FIXED: Add HUD hint for controls
         cv2.putText(frame, "P: Pause | Q: Quit", (10, 470), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+
+        # ── Clip recorder — feed frame every loop iteration ──────────────
+        # Only feed when not calibrating and not paused
+        if not calibration_mode and not paused:
+            completed_clip = clip_recorder.add_frame(frame)
+            if completed_clip:
+                # Clip file is complete — already associated with the logged event
+                print(f"[INFO] Clip recording complete: {completed_clip}")
+        else:
+            # Still buffer frames (required for pre-alarm buffer) but
+            # do not record to disk during calibration or pause
+            try:
+                import cv2 as _cv2
+                small = _cv2.resize(frame, (480, 360))
+                clip_recorder.buffer.append(small)
+            except Exception:
+                pass
 
         # BUG 1 FIXED: -- Pause Overlay and Detection Skip --
         if paused:
@@ -204,7 +239,7 @@ try:
                         cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 165, 255), 3)
             # Skip all detection tracking but keep showing the frame
             cv2.imshow("Driver Fatigue Detection", frame)
-            
+
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
@@ -272,7 +307,7 @@ try:
         # ── Face-loss warning ──
         if len(rects) == 0:
             no_face_counter += 1
-            if no_face_counter > 90:  
+            if no_face_counter > 90:
                 cv2.putText(frame, "FACE NOT DETECTED - Monitoring Paused",
                             (10, 300), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
                 eye_closed_start_time  = None
@@ -363,8 +398,22 @@ try:
                         cv2.putText(frame, "DROWSINESS ALERT!", (10, 55),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 0, 255), 3)
                         sound_eyes_closed_alarm()
+
+                        # ── Clip recording trigger ────────────────────
+                        clip_path = None
+                        if not paused and not calibration_mode:
+                            if not clip_recorder.is_recording():
+                                try:
+                                    clip_path = clip_recorder.start_recording()
+                                except Exception as ce:
+                                    print(f"[WARN] Clip recording failed: {ce}")
+                                    clip_path = None
+
                         if not eye_event_logged:
-                            logger.log_event("drowsiness_alarm", drive_minutes, ear, EYE_AR_THRESH)
+                            logger.log_event(
+                                "drowsiness_alarm", drive_minutes, ear,
+                                EYE_AR_THRESH, clip_path=clip_path
+                            )
                             eye_event_logged = True
             else:
                 eye_closed_start_time = None
@@ -430,12 +479,34 @@ finally:
     if cap is not None and cap.isOpened():
         cap.release()
     cv2.destroyAllWindows()
+
+    # Stop any in-progress clip recording
+    try:
+        if clip_recorder.is_recording():
+            clip_recorder.stop_recording()
+    except Exception:
+        pass
+
     print("[INFO] Stream ended.")
     current_time = time.time()
-    
+
     # BUG 2 FIXED: Log final edge case pause
     if paused and pause_start_time is not None:
         total_paused_seconds += (current_time - pause_start_time)
-        
+
     total_drive_time = round((current_time - drive_start_time - total_paused_seconds) / 60, 2)
-    logger.save_and_print_summary(total_drive_time)
+
+    # Compute risk score and close session
+    risk_score = None
+    if session_id is not None:
+        try:
+            risk_score = compute_risk_score(session_id)
+            print(f"[INFO] Risk Score: {risk_score} / 100")
+        except Exception as e:
+            print(f"[WARN] Could not compute risk score: {e}")
+
+    logger.save_and_print_summary(
+        total_drive_time,
+        session_id=session_id,
+        risk_score=risk_score,
+    )
