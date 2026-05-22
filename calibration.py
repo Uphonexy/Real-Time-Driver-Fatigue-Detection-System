@@ -1,3 +1,13 @@
+"""
+DEPRECATION NOTICE
+------------------
+calibration.py is used exclusively by main.py (the OpenCV-only entry point)
+for age-group selection via keyboard key presses.
+
+For the Tkinter dashboard (dashboard.py), driver setup and age-group selection
+are now handled by driver_manager.py, which also creates the driver profile in
+the SQLite database.  calibration.py is kept to avoid breaking main.py.
+"""
 import time
 import cv2
 import imutils
