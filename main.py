@@ -69,7 +69,11 @@ def main():
         age_group   = age_group,
         session_id  = session_id,
     )
-    engine.open_camera()
+    try:
+        engine.open_camera()
+    except Exception as e:
+        _log.critical(f"Camera initialization failed: {e}")
+        sys.exit(1)
 
     _log.info("Running… Press 'q' to quit, 'p' to pause/resume.")
 

@@ -73,6 +73,7 @@ shared_state = {
     "calibration_complete_time": 0,
     "active_drive_seconds":    0.0,
     "break_reminder_shown":    False,
+    "camera_error":            None,
 }
 
 
@@ -110,7 +111,14 @@ def camera_thread_func(driver_id, driver_name, age_group, session_id):
         session_id    = session_id,
         alert_callback= add_alert,
     )
-    engine.open_camera()
+    
+    try:
+        engine.open_camera()
+    except Exception as e:
+        _log.error("Camera initialization failed: %s", e)
+        with state_lock:
+            shared_state["camera_error"] = f"Could not open camera:\n{e}"
+        return
 
     try:
         while True:
@@ -135,6 +143,8 @@ def camera_thread_func(driver_id, driver_name, age_group, session_id):
 
             if result is None:
                 _log.error("Camera failed — stopping camera thread.")
+                with state_lock:
+                    shared_state["camera_error"] = "Camera feed lost during session."
                 break
 
             # Expire alert banner
@@ -736,11 +746,19 @@ class DashboardApp:
     # ── Update loops ───────────────────────────────────────────────────────────
     def _update_feed(self):
         with state_lock:
+            cam_err        = shared_state["camera_error"]
             frame_rgb      = shared_state["frame"]
             is_calibrating = shared_state["calibrating"]
             calib_rem      = shared_state["calib_remaining"]
             alert_active   = shared_state["alert_active"]
             break_shown    = shared_state["break_reminder_shown"]
+
+        if cam_err:
+            with state_lock:
+                shared_state["camera_error"] = None
+            messagebox.showerror("Camera Failure", cam_err)
+            self._on_closing()
+            return
 
         # Fix 12 — non-blocking break reminder.
         # messagebox.showwarning() was blocking the Tkinter event loop, freezing

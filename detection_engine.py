@@ -131,6 +131,8 @@ class DetectionEngine:
         self._yawn_counted   = False
         self._yawn_status    = False
         self.yawn_timestamps: list[float] = []
+        self._mar_history: list[float]    = []
+        self._last_yawn_end_time = 0.0
 
         self._head_down_start: Optional[float]  = None
         self._distracted_start: Optional[float] = None
@@ -213,7 +215,7 @@ class DetectionEngine:
                 _log.warning("%s — exception: %s", label, exc)
 
         _log.error("Could not open camera with any backend or index.")
-        sys.exit(1)
+        raise IOError("Could not open camera with any backend or index.")
 
     @staticmethod
     def _read_frame_safe(cap: cv2.VideoCapture, retries: int = 3):
@@ -240,9 +242,11 @@ class DetectionEngine:
             self._eye_event_logged = False
             self._yawn_start       = None
             self._yawn_counted     = False
+            self._yawn_status      = False
             self._head_down_start  = None
             self._distracted_start = None
             self._ear_history.clear()
+            self._mar_history.clear()
             _log.info("Detection resumed.")
 
     def stop(self):
@@ -305,9 +309,12 @@ class DetectionEngine:
             result.mouth_status = "N/A"
             self._eye_closed_start = None
             self._yawn_start       = None
+            self._yawn_status      = False
+            self._yawn_counted     = False
             self._head_down_start  = None
             self._distracted_start = None
             self._ear_history.clear()
+            self._mar_history.clear()
             return result
 
         effective_drive_minutes = max(0.0, (current_drive_seconds - CALIBRATION_DURATION) / 60)
@@ -397,6 +404,7 @@ class DetectionEngine:
                 self._head_down_start  = None
                 self._distracted_start = None
                 self._ear_history.clear()
+                self._mar_history.clear()
             result.eye_status   = "N/A"
             result.mouth_status = "N/A"
         else:
@@ -415,20 +423,25 @@ class DetectionEngine:
             ear       = (left_ear + right_ear) / 2.0
             mou_ear   = mouth_aspect_ratio(mouth)
 
-            # Smooth EAR to filter out landmark detection jitter/noise
             self._ear_history.append(ear)
             if len(self._ear_history) > 5:
                 self._ear_history.pop(0)
             smoothed_ear = sum(self._ear_history) / len(self._ear_history)
 
+            # Smooth MAR to filter out mouth landmark detection jitter/noise
+            self._mar_history.append(mou_ear)
+            if len(self._mar_history) > 5:
+                self._mar_history.pop(0)
+            smoothed_mar = sum(self._mar_history) / len(self._mar_history)
+
             result.ear = smoothed_ear
-            result.mar = mou_ear
+            result.mar = smoothed_mar
 
             # Collect calibration samples - filter out mid-blinks
             if self._calibrating:
                 if ear > 0.20:
                     self._ear_samples.append(ear)
-                self._mar_samples.append(mou_ear)
+                self._mar_samples.append(smoothed_mar)
 
             reprojectdst, euler_angle = get_head_pose(shape, frame_width, frame_height)
 
@@ -533,22 +546,25 @@ class DetectionEngine:
                         (480, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 0), 2)
 
             # ── Yawn (Sliding Window logic) ───────────────────────────────
-            if mou_ear > self._MOU_AR_THRESH:
+            cooldown_active = (current_time - self._last_yawn_end_time < 2.0)
+            
+            if smoothed_mar > self._MOU_AR_THRESH:
                 result.mouth_status = "Yawning..."
                 cv2.putText(frame, "Yawning...",
                             (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                if self._yawn_start is None:
+                if self._yawn_start is None and not cooldown_active:
                     self._yawn_start = current_time
-                yawn_elapsed = current_time - self._yawn_start
-                cv2.putText(frame, f"Yawn: {yawn_elapsed:.1f}s",
-                            (10, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
-                if yawn_elapsed >= YAWN_DURATION_THRESH:
-                    self._yawn_status  = True
-                    self._yawn_counted = True
+                if self._yawn_start is not None:
+                    yawn_elapsed = current_time - self._yawn_start
+                    cv2.putText(frame, f"Yawn: {yawn_elapsed:.1f}s",
+                                (10, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+                    if yawn_elapsed >= YAWN_DURATION_THRESH:
+                        self._yawn_status = True
             else:
                 result.mouth_status = "Closed"
                 if self._yawn_status:
                     self.yawn_timestamps.append(current_time)
+                    self._last_yawn_end_time = current_time
                     self._yawn_status = False
                 self._yawn_start   = None
                 self._yawn_counted = False
@@ -566,7 +582,7 @@ class DetectionEngine:
                             (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 0, 255), 3)
                 sound_yawning_alarm()
                 self._logger.log_event(
-                    "yawn_detected", drive_minutes, mou_ear, self._MOU_AR_THRESH)
+                    "yawn_detected", drive_minutes, smoothed_mar, self._MOU_AR_THRESH)
                 self._fire_alert("yawn_detected", "3 yawns detected", result)
                 self.yawn_timestamps.clear()
 
@@ -625,18 +641,10 @@ class DetectionEngine:
         if self._cap is not None and self._cap.isOpened():
             self._cap.release()
 
-        if self._yawn_status and not self._calibrating:
-            _log.info("Flushing 1 confirmed in-progress yawn at session end.")
-            final_drive_mins = self.get_active_drive_seconds() / 60
-            try:
-                self._logger.log_event(
-                    "yawn_detected", final_drive_mins, 0.0, self._MOU_AR_THRESH
-                )
-            except Exception as e:
-                _log.warning("Could not log end-of-session yawn: %s", e)
-
         if self._paused and self._pause_start_time is not None:
             self._total_paused_secs += time.time() - self._pause_start_time
+            self._pause_start_time = None
+            self._paused = False
 
         total_drive_mins = round(
             (time.time() - self._drive_start_time - self._total_paused_secs) / 60, 2

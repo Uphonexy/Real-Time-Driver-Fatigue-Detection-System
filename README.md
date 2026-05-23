@@ -118,7 +118,7 @@ python main.py
 
 1. The **Driver Setup** dialog appears.
 2. Select an existing driver or create a new profile (name + age group).
-3. The camera opens and a **5-minute calibration phase** begins.  
+3. The camera opens and a **30-second calibration phase** begins.  
    Sit normally with eyes open so WakeMate learns your baseline EAR/MAR.
 4. After calibration, real-time monitoring starts automatically.
 
@@ -162,7 +162,7 @@ Shows all past sessions for the selected driver with risk scores.
 ```
 EAR = (‖p2−p6‖ + ‖p3−p5‖) / (2 · ‖p1−p4‖)
 ```
-- Calibrated per-driver during the 5-minute startup phase
+- Calibrated per-driver during the 30-second startup phase
 - **Alarm** fires if EAR < threshold for **≥1.5 seconds**
 
 ### Mouth Aspect Ratio (MAR)
