@@ -35,6 +35,8 @@ _log = get_logger("engine")
 CALIBRATION_DURATION       = 30    # 30 seconds for quick setup
 EYE_CLOSED_DURATION_THRESH = 1.5   # seconds before drowsiness alarm
 YAWN_DURATION_THRESH       = 1.5   # seconds of continuous open mouth
+HEAD_DOWN_DURATION_THRESH  = 1.0   # seconds of continuous head down before alarm
+DISTRACTED_DURATION_THRESH = 1.0   # seconds of continuous distraction before alarm
 NO_FACE_FRAME_LIMIT        = 90    # frames before "face not detected" banner
 MAX_CONSECUTIVE_FAILURES   = 30    # consecutive bad reads before giving up
 LOG_COOLDOWN               = 3.0   # seconds between repeated event DB writes
@@ -118,7 +120,7 @@ class DetectionEngine:
         self._personal_baseline_mar = 0.65
         self._EYE_AR_THRESH         = 0.24
         self._MOU_AR_THRESH         = self._personal_baseline_mar
-        self._HEAD_PITCH_THRESH     = 10
+        self._HEAD_PITCH_THRESH     = 12
         self._DISTRACTION_YAW_THRESH= 20
         self._last_threshold_update = -ADAPTIVE_THRESH_INTERVAL
 
@@ -129,6 +131,9 @@ class DetectionEngine:
         self._yawn_counted   = False
         self._yawn_status    = False
         self.yawn_timestamps: list[float] = []
+
+        self._head_down_start: Optional[float]  = None
+        self._distracted_start: Optional[float] = None
 
         self._no_face_counter      = 0
         self._consecutive_failures = 0
@@ -234,6 +239,8 @@ class DetectionEngine:
             self._eye_event_logged = False
             self._yawn_start       = None
             self._yawn_counted     = False
+            self._head_down_start  = None
+            self._distracted_start = None
             _log.info("Detection resumed.")
 
     def stop(self):
@@ -296,6 +303,8 @@ class DetectionEngine:
             result.mouth_status = "N/A"
             self._eye_closed_start = None
             self._yawn_start       = None
+            self._head_down_start  = None
+            self._distracted_start = None
             return result
 
         effective_drive_minutes = max(0.0, (current_drive_seconds - CALIBRATION_DURATION) / 60)
@@ -382,6 +391,8 @@ class DetectionEngine:
                 self._yawn_start       = None
                 self._yawn_counted     = False
                 self._yawn_status      = False
+                self._head_down_start  = None
+                self._distracted_start = None
             result.eye_status   = "N/A"
             result.mouth_status = "N/A"
         else:
@@ -429,23 +440,39 @@ class DetectionEngine:
                 cv2.putText(frame, "HEAD DOWN",
                             (10, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                 if not self._calibrating:
-                    sound_head_down_alarm()
-                    if current_time - self._last_head_down_log >= LOG_COOLDOWN:
-                        self._logger.log_event(
-                            "head_down", drive_minutes, xx, self._HEAD_PITCH_THRESH)
-                        self._fire_alert("head_down", "Head down", result)
-                        self._last_head_down_log = current_time
+                    if self._head_down_start is None:
+                        self._head_down_start = current_time
+                    hd_elapsed = current_time - self._head_down_start
+                    cv2.putText(frame, f"Head down: {hd_elapsed:.1f}s / {HEAD_DOWN_DURATION_THRESH:.1f}s",
+                                (10, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+                    if hd_elapsed >= HEAD_DOWN_DURATION_THRESH:
+                        sound_head_down_alarm()
+                        if current_time - self._last_head_down_log >= LOG_COOLDOWN:
+                            self._logger.log_event(
+                                "head_down", drive_minutes, xx, self._HEAD_PITCH_THRESH)
+                            self._fire_alert("head_down", "Head down", result)
+                            self._last_head_down_log = current_time
+            else:
+                self._head_down_start = None
 
             if abs(yy) > self._DISTRACTION_YAW_THRESH:
                 cv2.putText(frame, "DISTRACTED",
                             (10, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
                 if not self._calibrating:
-                    sound_distracted_alarm()
-                    if current_time - self._last_distracted_log >= LOG_COOLDOWN:
-                        self._logger.log_event(
-                            "distracted", drive_minutes, yy, self._DISTRACTION_YAW_THRESH)
-                        self._fire_alert("distracted", "Distracted", result)
-                        self._last_distracted_log = current_time
+                    if self._distracted_start is None:
+                        self._distracted_start = current_time
+                    dist_elapsed = current_time - self._distracted_start
+                    cv2.putText(frame, f"Distracted: {dist_elapsed:.1f}s / {DISTRACTED_DURATION_THRESH:.1f}s",
+                                (10, 290), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+                    if dist_elapsed >= DISTRACTED_DURATION_THRESH:
+                        sound_distracted_alarm()
+                        if current_time - self._last_distracted_log >= LOG_COOLDOWN:
+                            self._logger.log_event(
+                                "distracted", drive_minutes, yy, self._DISTRACTION_YAW_THRESH)
+                            self._fire_alert("distracted", "Distracted", result)
+                            self._last_distracted_log = current_time
+            else:
+                self._distracted_start = None
 
             if ear < self._EYE_AR_THRESH:
                 result.eye_status = "Closed"
@@ -558,7 +585,7 @@ class DetectionEngine:
             top_70 = self._ear_samples[:slice_idx]
             if top_70:
                 open_eye_avg = sum(top_70) / len(top_70)
-                self._personal_baseline_ear = max(0.22, open_eye_avg - 0.05)
+                self._personal_baseline_ear = max(0.21, open_eye_avg - 0.06)
                 self._EYE_AR_THRESH         = self._personal_baseline_ear
                 self._logger.update_baseline(self._personal_baseline_ear)
 
@@ -568,7 +595,7 @@ class DetectionEngine:
             bot_70 = self._mar_samples[:slice_idx]
             if bot_70:
                 closed_mouth_avg = sum(bot_70) / len(bot_70)
-                self._personal_baseline_mar = closed_mouth_avg + 0.10
+                self._personal_baseline_mar = max(0.53, closed_mouth_avg + 0.35)
                 self._MOU_AR_THRESH         = self._personal_baseline_mar
                 self._logger.update_baseline_mar(self._personal_baseline_mar)
 

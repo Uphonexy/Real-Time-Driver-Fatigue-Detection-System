@@ -142,9 +142,8 @@ def camera_thread_func(driver_id, driver_name, age_group, session_id):
                 with state_lock:
                     shared_state["alert_active"] = False
 
-            # Push new alerts from this frame
-            for alert in result.new_alerts:
-                add_alert(alert["type"], alert["desc"])
+            # Alerts are already pushed instantly via the engine's alert_callback,
+            # so we don't need to push them again here.
 
             # Break reminder — show once
             if result.break_reminder:
@@ -480,6 +479,7 @@ class DashboardApp:
                                         font=("Segoe UI", 10, "bold"))
 
         self.history_tree.bind("<<TreeviewSelect>>", self._on_history_select)
+        self.history_tree.bind("<ButtonRelease-1>", self._on_history_select)
 
         # ── Action buttons ────────────────────────────────────────────────────
         btn_frame = tk.Frame(panel, bg=self.C_PANEL)
@@ -576,6 +576,13 @@ class DashboardApp:
                     tags=(tag,),
                 )
                 self._history_session_map[iid] = s
+
+            # Auto-select the first session if available
+            children = self.history_tree.get_children()
+            if children and not NO_DB_MODE and sessions:
+                self.history_tree.selection_set(children[0])
+                self.history_tree.focus(children[0])
+                self._on_history_select()
 
         except Exception as e:
             _log.warning("refresh_history failed: %s", e)
