@@ -1,31 +1,39 @@
 """
 driver_manager.py — Tkinter driver-setup dialog for the Fatigue Detection System.
 
-Replaces the old age-group selection screen.  Presents two modes:
+Presents two modes:
   A) Select an existing driver from the database
   B) Create a new driver (name + age group)
 
 Returns (driver_id, driver_name, age_group).
 Calls sys.exit(0) if the window is closed without a selection.
+
+v2.0: Adds NO_DB_MODE flag.  When the database fails and driver_id falls
+back to -1, NO_DB_MODE is set to True so the DashboardApp can display a
+persistent warning banner instead of silently failing later with FK errors.
 """
 
 import sys
 import tkinter as tk
 from tkinter import messagebox
 from database import get_all_drivers, create_driver
+from app_logger import get_logger
 
-# ──────────────────────────────────────────────
-# Design tokens — match dashboard.py color scheme
-# ──────────────────────────────────────────────
-C_BG     = "#0a0f1e"
-C_PANEL  = "#111827"
-C_CYAN   = "#00d4ff"
-C_GREEN  = "#00e676"
-C_AMBER  = "#ffaa00"
-C_RED    = "#ff3b3b"
-C_WHITE  = "#ffffff"
-C_GRAY   = "#888888"
-C_INPUT  = "#1e293b"
+_log = get_logger("driver_manager")
+
+# ── Public flag — checked by dashboard.py to show No-DB banner ───────────────
+NO_DB_MODE: bool = False
+
+# ── Design tokens ─────────────────────────────────────────────────────────────
+C_BG    = "#0a0f1e"
+C_PANEL = "#111827"
+C_CYAN  = "#00d4ff"
+C_GREEN = "#00e676"
+C_AMBER = "#ffaa00"
+C_RED   = "#ff3b3b"
+C_WHITE = "#ffffff"
+C_GRAY  = "#888888"
+C_INPUT = "#1e293b"
 
 FONT_HEAD  = ("Segoe UI", 14, "bold")
 FONT_LABEL = ("Segoe UI", 11)
@@ -35,15 +43,17 @@ FONT_SMALL = ("Segoe UI",  9)
 AGE_GROUPS = ["18-30", "31-45", "46-60", "60+"]
 
 
-# ──────────────────────────────────────────────
-# Public entry point
-# ──────────────────────────────────────────────
+# ── Public entry point ────────────────────────────────────────────────────────
 
 def run_driver_setup() -> tuple[int, str, str]:
     """
     Display the Driver Setup dialog and return (driver_id, driver_name, age_group).
     Blocks until the user makes a selection.  Calls sys.exit(0) on window close.
+
+    If the DB fails and driver_id is -1, sets the module-level NO_DB_MODE = True.
     """
+    global NO_DB_MODE
+
     result = [None]   # mutable container so inner callbacks can write to it
 
     root = tk.Tk()
@@ -53,14 +63,13 @@ def run_driver_setup() -> tuple[int, str, str]:
     root.resizable(False, False)
     root.eval("tk::PlaceWindow . center")
 
-    # ── Graceful close ────────────────────────
     def on_close():
         root.destroy()
         sys.exit(0)
 
     root.protocol("WM_DELETE_WINDOW", on_close)
 
-    # ── Header ────────────────────────────────
+    # ── Header ───────────────────────────────────────────────────────────────
     tk.Label(
         root,
         text="🚗  WAKEMATE — Driver Setup",
@@ -73,21 +82,19 @@ def run_driver_setup() -> tuple[int, str, str]:
         font=FONT_SMALL, bg=C_BG, fg=C_GRAY,
     ).pack()
 
-    # ── Tab switcher ──────────────────────────
+    # ── Tab switcher ──────────────────────────────────────────────────────────
     tab_frame = tk.Frame(root, bg=C_BG)
     tab_frame.pack(pady=(10, 0))
 
     content_frame = tk.Frame(root, bg=C_PANEL, bd=0, relief=tk.FLAT)
     content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 15))
 
-    # We track which tab panel is active
     panels: dict[str, tk.Frame] = {}
 
     def show_panel(name: str):
-        for pname, panel in panels.items():
+        for panel in panels.values():
             panel.pack_forget()
         panels[name].pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
-        # Update tab button styles
         btn_existing.config(
             fg=C_CYAN if name == "existing" else C_GRAY,
             relief=tk.SUNKEN if name == "existing" else tk.FLAT,
@@ -113,19 +120,17 @@ def run_driver_setup() -> tuple[int, str, str]:
     )
     btn_new.pack(side=tk.LEFT, padx=4)
 
-    # ══════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════════════
     # PANEL A — Existing Driver
-    # ══════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════════════
     panel_existing = tk.Frame(content_frame, bg=C_PANEL)
     panels["existing"] = panel_existing
 
     tk.Label(panel_existing, text="Select Driver", font=FONT_HEAD,
              bg=C_PANEL, fg=C_CYAN).pack(anchor="w")
-
     tk.Label(panel_existing, text="Choose from previously registered drivers:",
              font=FONT_SMALL, bg=C_PANEL, fg=C_GRAY).pack(anchor="w", pady=(0, 8))
 
-    # Listbox + scrollbar
     list_frame = tk.Frame(panel_existing, bg=C_PANEL)
     list_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -145,14 +150,12 @@ def run_driver_setup() -> tuple[int, str, str]:
     driver_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     scrollbar.config(command=driver_listbox.yview)
 
-    # Populate with DB drivers
     all_drivers = get_all_drivers()
-    driver_map: dict[int, dict] = {}   # listbox_index → driver dict
+    driver_map: dict[int, dict] = {}
 
     if all_drivers:
         for i, drv in enumerate(all_drivers):
-            display = f"  {drv['name']}  ({drv['age_group']})"
-            driver_listbox.insert(tk.END, display)
+            driver_listbox.insert(tk.END, f"  {drv['name']}  ({drv['age_group']})")
             driver_map[i] = drv
     else:
         driver_listbox.insert(tk.END, "  — No drivers registered yet —")
@@ -175,15 +178,14 @@ def run_driver_setup() -> tuple[int, str, str]:
         command=cmd_start_existing,
     ).pack(pady=(12, 0), anchor="e")
 
-    # ══════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════════════
     # PANEL B — New Driver
-    # ══════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════════════
     panel_new = tk.Frame(content_frame, bg=C_PANEL)
     panels["new"] = panel_new
 
     tk.Label(panel_new, text="Create New Driver", font=FONT_HEAD,
              bg=C_PANEL, fg=C_CYAN).pack(anchor="w")
-
     tk.Label(panel_new, text="Enter driver name (max 30 chars):",
              font=FONT_SMALL, bg=C_PANEL, fg=C_GRAY).pack(anchor="w", pady=(6, 2))
 
@@ -198,7 +200,6 @@ def run_driver_setup() -> tuple[int, str, str]:
     )
     name_entry.pack(anchor="w", ipady=5)
 
-    # Character limit enforcement
     def _limit_name(*_):
         v = name_var.get()
         if len(v) > 30:
@@ -209,10 +210,8 @@ def run_driver_setup() -> tuple[int, str, str]:
              font=FONT_SMALL, bg=C_PANEL, fg=C_GRAY).pack(anchor="w", pady=(14, 4))
 
     age_var = tk.StringVar(value="")
-
     age_btn_frame = tk.Frame(panel_new, bg=C_PANEL)
     age_btn_frame.pack(anchor="w")
-
     age_buttons: list[tk.Button] = []
 
     def select_age(age: str):
@@ -236,6 +235,7 @@ def run_driver_setup() -> tuple[int, str, str]:
         age_buttons.append(btn)
 
     def cmd_create():
+        global NO_DB_MODE
         name = name_var.get().strip()
         age  = age_var.get()
         if not name:
@@ -244,15 +244,25 @@ def run_driver_setup() -> tuple[int, str, str]:
         if not age:
             messagebox.showwarning("Missing Age Group", "Please select an age group.", parent=root)
             return
+
         driver_id = create_driver(name, age)
+
         if driver_id is None:
-            messagebox.showerror(
-                "DB Error",
-                "Could not save driver to database. Continuing without DB logging.",
+            # DB failed — activate No-DB mode instead of crashing
+            NO_DB_MODE = True
+            driver_id  = -1
+            _log.error(
+                "DB failed to create driver '%s'. Entering No-DB mode (session data will NOT be saved).",
+                name,
+            )
+            messagebox.showwarning(
+                "Database Error",
+                "Could not save driver to database.\n\n"
+                "The system will run in No-DB Mode — monitoring is active "
+                "but session data will NOT be saved.",
                 parent=root,
             )
-            # Use a fallback negative id so the rest of the system still works
-            driver_id = -1
+
         result[0] = (driver_id, name, age)
         root.destroy()
 
@@ -264,7 +274,7 @@ def run_driver_setup() -> tuple[int, str, str]:
         command=cmd_create,
     ).pack(pady=(16, 0), anchor="e")
 
-    # ── Show first panel ──────────────────────
+    # ── Show first panel ──────────────────────────────────────────────────────
     show_panel("existing" if all_drivers else "new")
 
     root.mainloop()
@@ -272,4 +282,4 @@ def run_driver_setup() -> tuple[int, str, str]:
     if result[0] is None:
         sys.exit(0)
 
-    return result[0]   # (driver_id, driver_name, age_group)
+    return result[0]

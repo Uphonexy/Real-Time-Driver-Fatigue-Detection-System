@@ -128,6 +128,11 @@ def get_driver_by_id(driver_id: int) -> dict | None:
 # ──────────────────────────────────────────────
 def create_session(driver_id: int, age_group: str, start_time: str) -> int | None:
     """Insert a new session row. Returns the new session id, or None on error."""
+    # Fix 10 — self-defending guard: driver_id=-1 is used in No-DB mode;
+    # attempting INSERT with an invalid FK would raise a constraint error.
+    if driver_id < 0:
+        print(f"[DB] create_session skipped — No-DB mode (driver_id={driver_id})")
+        return None
     try:
         conn = _get_conn()
         cur = conn.cursor()

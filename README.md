@@ -1,162 +1,271 @@
-# Real-Time Driver Fatigue Detection System — WAKEMATE
+# WakeMate v2.0 — Real-Time Driver Fatigue Detection System
 
-A Python-based real-time drowsiness and distraction detection system that uses facial landmarks to monitor eye closure, yawning, and head pose. The system triggers audio alarms, records short video clips at alarm events, logs all session data to a SQLite database, and provides a rich Tkinter dashboard with driver profiles and session history.
+> **⚠ Safety Notice:** This system is a research and assistive tool.  
+> It does not replace human judgment or safe driving practices.
 
----
-
-## Features
-
-### Core Detection
-- **Eye Closure Detection** — Real-time Eye Aspect Ratio (EAR) monitoring; alarm fires after eyes are closed ≥ 1.5 seconds
-- **Yawning Detection** — Mouth Aspect Ratio (MAR) monitoring; three confirmed yawn cycles trigger an alert
-- **Head Pose & Distraction Monitoring** — Detects head pitch (nodding) and yaw (looking away) via 3D pose estimation
-- **Personalized Calibration** — 5-minute initialization phase builds a unique EAR/MAR baseline per driver
-- **Adaptive Thresholds** — Sensitivity adjusts automatically based on age group and cumulative drive time
-- **Distinct Audio Alerts** — Separate alarm sounds for drowsiness, yawning, head-down, and distraction events
-
-### New in This Release
-- **Driver Profiles** — Named driver accounts stored in SQLite; returning drivers are recognized across sessions
-- **Session History** — Every drive is recorded (start/end time, drive duration, baselines, risk score) and viewable in the dashboard History tab
-- **Clip Recording** — A 4-second MP4 clip (1 s pre-alarm + 3 s post-alarm) is saved automatically every time a drowsiness alarm fires, at 480×360 / 10 fps (~300–600 KB per clip)
-- **Risk Scoring** — Each session receives a 0–100 risk score (Low / Moderate / High / Critical) computed from weighted event counts
-- **📊 History Tab** — Treeview in the dashboard listing all past sessions with color-coded risk labels
-- **Pause-Aware Drive Time** — Drive timer correctly excludes paused intervals in both the dashboard and the OpenCV window
+WakeMate monitors a driver's face in real time using a webcam, detecting drowsiness, yawning, head-drop, and distraction. When fatigue is detected it sounds an audio alarm, records a short video clip, and logs the event to an SQLite database.
 
 ---
 
-## Project Structure
+## What's New in v2.0
+
+| Feature | Detail |
+|---------|--------|
+| **DetectionEngine** | All camera/detection logic extracted into one class — no more 200-line code duplication |
+| **SQLite-Primary** | SQLite is now the single source of truth; JSON is exported on demand |
+| **Export (JSON / CSV)** | One-click export from the History tab for offline analysis |
+| **Clip Playback** | "▶ Play Clip" button opens recorded drowsiness clips in your system media player |
+| **No-DB Mode** | DB failures show a visible amber banner instead of crashing |
+| **Break Reminder** | One-time popup after 120 minutes of continuous driving |
+| **Audio Fallback** | Missing WAV files fall back to a system beep — no crash |
+| **Clip Cleanup** | Oldest clips are auto-deleted on startup to cap disk usage at 50 clips |
+| **App Logging** | All events written to `wakemate.log` with timestamps and log levels |
+| **Version Branding** | Window title shows `WAKEMATE v2.0.0` |
+
+---
+
+## Architecture
 
 ```
-project/
-├── main.py              Entry point — OpenCV detection window
-├── dashboard.py         Tkinter GUI dashboard with live feed & history tab
-│
-├── database.py          SQLite persistence layer (fatigue.db)
-├── analytics.py         Risk scoring, session summaries, driver trend data
-├── clip_recorder.py     Drowsiness alarm clip recorder (OpenCV VideoWriter)
-├── driver_manager.py    Driver setup Tkinter dialog (new / existing driver)
-│
-├── detector.py          EAR, MAR, head-pose math
-├── thresholds.py        Adaptive EAR/MAR threshold computation
-├── calibration.py       Age-group selection for main.py (OpenCV key-press UI)
-│                        ⚠ Superseded in dashboard.py by driver_manager.py
-├── alarms.py            Pygame audio alerts with cooldown
-├── logger.py            JSON session logging + DB event sink
-│
-├── requirements.txt
-├── fatigue.db           ← auto-created at runtime (git-ignored)
-└── clips/               ← auto-created at runtime (git-ignored)
-    └── clip_YYYYMMDD_HHMMSS.mp4
+dashboard.py          main.py
+     │                    │
+     │   (Tkinter GUI)    │  (OpenCV/CLI)
+     └────────┬───────────┘
+              │ instantiates
+              ▼
+    detection_engine.py   ◄── detector.py  (EAR / MAR / head pose)
+         │      │              thresholds.py (adaptive EAR/MAR)
+         │      │              alarms.py      (audio + fallback)
+         │      │              clip_recorder.py (MP4 clips)
+         │      └──────────►  logger.py      (in-memory + DB)
+         │
+         ▼
+      database.py (SQLite: drivers / sessions / events)
+         │
+         ▼
+      exporter.py  (JSON / CSV on demand)
+      analytics.py (risk scoring, trends)
+      app_logger.py (rotating log file → wakemate.log)
 ```
 
 ---
 
-## Dependencies
+## Requirements
 
-| Package | Purpose |
-|---|---|
-| `opencv-python` | Video capture, frame processing, clip writing |
-| `dlib` | Facial landmark detection |
-| `numpy` | Numerical arrays |
-| `imutils` | Frame resizing helpers |
-| `pygame` | Audio alarm playback |
-| `Pillow` | Tkinter image display in dashboard |
-| `scipy` | Geometry calculations in detector.py |
+### Python
+Python **3.10+** is required (uses `match` expressions and `X | Y` union types).
 
-Install all dependencies:
-```bash
+### Windows — Installing cmake and dlib
+
+`dlib` requires a C++ compiler and `cmake`.
+
+1. **Install Visual Studio Build Tools** (C++ workload):  
+   Download from https://visualstudio.microsoft.com/visual-cpp-build-tools/
+
+2. **Install cmake**:  
+   ```powershell
+   winget install Kitware.CMake
+   ```
+   Or download the installer from https://cmake.org/download/
+
+3. Restart your terminal so `cmake` is on `PATH`.
+
+---
+
+## Installation
+
+```powershell
+# 1. Clone / unzip the project
+cd Real-Time---Driver-Fatigue-Detection-System-master
+
+# 2. Create a virtual environment
+python -m venv venv
+.\venv\Scripts\activate
+
+# 3. Install dependencies
 pip install -r requirements.txt
+
+# 4. Download the Dlib landmark model (~99 MB)
+python download_model.py
 ```
+
+### Required Audio Assets
+
+The alarm sounds are included in the repository:
+
+| File | Used for |
+|------|----------|
+| `sound.wav` | Eye closure / head-down / distraction alarms |
+| `music.wav` | Yawn alarm |
+
+If either file is **missing**, WakeMate falls back to a system beep and logs a warning to `wakemate.log` — it will not crash.
 
 ---
 
-## Setup
+## Usage
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Uphonexy/Real-Time-Driver-Fatigue-Detection-System.git
-   cd Real-Time-Driver-Fatigue-Detection-System
-   ```
+### Dashboard (recommended)
+```powershell
+python dashboard.py
+```
 
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+### CLI / OpenCV window
+```powershell
+python main.py
+```
 
-3. **Download the facial landmark model**
-   Download `shape_predictor_68_face_landmarks.dat` from the [dlib model zoo](http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2) and place it in the project root.
+### First Launch
 
-4. **Run the application**
-
-   **Dashboard mode** (recommended — full GUI with history and driver profiles):
-   ```bash
-   python dashboard.py
-   ```
-
-   **OpenCV mode** (lightweight, keyboard-only):
-   ```bash
-   python main.py
-   ```
+1. The **Driver Setup** dialog appears.
+2. Select an existing driver or create a new profile (name + age group).
+3. The camera opens and a **5-minute calibration phase** begins.  
+   Sit normally with eyes open so WakeMate learns your baseline EAR/MAR.
+4. After calibration, real-time monitoring starts automatically.
 
 ---
 
-## How It Works
+## Dashboard Guide
 
-### Startup flow
-1. The **Driver Setup** dialog appears — create a new driver (name + age group) or select an existing one.
-2. A new session row is created in `fatigue.db`.
-3. The camera opens and a **5-minute calibration phase** begins — sit normally and keep your eyes open.
-4. After calibration, adaptive thresholds are set and monitoring begins.
+### 📷 Live Monitor Tab
 
-### During a drive
-| Event | Action |
-|---|---|
-| Eyes closed ≥ 1.5 s | 🔊 Alarm + 4-second MP4 clip saved to `clips/` |
-| 3 confirmed yawns | 🔊 Alarm + event logged |
-| Head pitched down | 🔊 Alarm + event logged |
-| Looking away | 🔊 Alarm + event logged |
+| Widget | Description |
+|--------|-------------|
+| **Live Feed** | Camera stream with landmark overlay. Flashes red on alert. |
+| **Driver Stats** | EAR, MAR, yawn count, drive time, status |
+| **Alerts (Last 5)** | Most recent fatigue events with timestamps |
 
-### Session end
-- Press **⏹ Stop** (dashboard) or **Q** (OpenCV window)
-- A `session_YYYYMMDD_HHMMSS.json` file is saved (full event log)
-- The session row in `fatigue.db` is closed with end time, drive duration, and risk score
-- The **📊 History** tab updates with the new session
+### 📊 History Tab
 
-### Risk Score
-```
-drowsiness_alarm  ×25 pts  (cap 100)
-yawn_detected     ×10 pts  (cap  40)
-head_down          ×5 pts  (cap  30)
-distracted         ×5 pts  (cap  30)
-─────────────────────────────────────
-Final = min(100, sum)
+Shows all past sessions for the selected driver with risk scores.
 
-0–25   → LOW RISK      (green)
-26–50  → MODERATE RISK (amber)
-51–75  → HIGH RISK     (red)
-76–100 → CRITICAL RISK (red, bold)
-```
-
----
-
-## Controls
-
-### Dashboard
 | Button | Action |
-|---|---|
-| ▶ Start | Resume detection after pause |
-| ⏸ Pause | Pause detection (timer freezes) |
-| ⏹ Stop | End session, save logs |
-| 🔄 Refresh History | Reload session history from DB |
+|--------|--------|
+| **⬇ Export JSON** | Save full session data (metadata + events) as `.json` |
+| **⬇ Export CSV** | Save event log as flat `.csv` for spreadsheet analysis |
+| **▶ Play Clip** | Open the most recent drowsiness clip in your system media player |
 
-### OpenCV window (`main.py`)
-| Key | Action |
-|---|---|
-| `P` | Pause / Resume |
-| `Q` | Quit and save session |
+> Select a row first to enable the buttons.
+
+### Control Panel
+
+| Button | Action |
+|--------|--------|
+| **▶ Start** | Resume after pause |
+| **⏸ Pause** | Pause detection (clock stops, no alarms) |
+| **⏹ Stop** | End session, save to DB, refresh history |
+
+---
+
+## Detection Logic
+
+### Eye Aspect Ratio (EAR)
+```
+EAR = (‖p2−p6‖ + ‖p3−p5‖) / (2 · ‖p1−p4‖)
+```
+- Calibrated per-driver during the 5-minute startup phase
+- **Alarm** fires if EAR < threshold for **≥1.5 seconds**
+
+### Mouth Aspect Ratio (MAR)
+```
+MAR = (Y1 + Y2) / (2 · X)    where X = mouth width
+```
+- **Yawn alarm** fires after **3 yawns ≥ 1.5 s** each
+
+### Head Pose
+Solved via `cv2.solvePnP` with 14 facial landmarks:
+- **Head down** → pitch angle X > 10°
+- **Distracted** → yaw angle |Y| > 20°
+
+### Adaptive Thresholds
+Every 30 minutes, EAR/MAR thresholds are recalculated based on:
+- Age group factor (older → more sensitive)
+- Drive duration factor (longer drive → more sensitive)
+
+### Risk Score (0–100)
+
+| Event | Points | Cap |
+|-------|--------|-----|
+| Drowsiness alarm | 25 | 100 |
+| Yawn detected | 10 | 40 |
+| Head down | 5 | 30 |
+| Distracted | 5 | 30 |
+
+---
+
+## Data & Files
+
+| File | Purpose |
+|------|---------|
+| `fatigue.db` | SQLite database (drivers, sessions, events) |
+| `wakemate.log` | Application log (rotating, max 5 MB × 3 backups) |
+| `clips/` | Short MP4 clips triggered by drowsiness alarms |
+
+### Database Schema
+
+```sql
+drivers  (id, name, age_group, created_at)
+sessions (id, driver_id, start_time, end_time, total_drive_mins,
+          baseline_ear, baseline_mar, risk_score, age_group)
+events   (id, session_id, event_type, timestamp, drive_minute,
+          metric_value, threshold_value, clip_path)
+```
+
+---
+
+## Troubleshooting
+
+### Camera won't open
+WakeMate tries 7 camera combinations (DirectShow, MSMF, Auto × indices 0–2).
+Check `wakemate.log` for which ones were attempted and why they failed.
+
+### `dlib` build fails
+Ensure cmake is installed and on PATH:
+```powershell
+cmake --version   # should print version
+```
+Then reinstall dlib:
+```powershell
+pip install dlib --no-cache-dir
+```
+
+### No alarm sound
+Check that `sound.wav` and `music.wav` exist in the project root.  
+A system beep fallback is used automatically if they are missing.
+
+### History tab is empty
+The History tab shows sessions for the **currently selected driver**.  
+Sessions from a different driver profile will not appear.
+
+---
+
+## Project Structure (v2.0)
+
+```
+├── dashboard.py          # Tkinter GUI entry point
+├── main.py               # OpenCV/CLI entry point  
+├── detection_engine.py   # 🆕 Core detection class (replaces duplication)
+├── app_logger.py         # 🆕 Centralised logging → wakemate.log
+├── exporter.py           # 🆕 On-demand JSON/CSV export
+├── download_model.py     # 🆕 One-command model downloader
+├── detector.py           # EAR / MAR / head pose math
+├── thresholds.py         # Adaptive threshold functions
+├── alarms.py             # Audio alarms with fallback
+├── clip_recorder.py      # MP4 clip recording + cleanup
+├── logger.py             # In-memory session logger + DB bridge
+├── database.py           # SQLite CRUD layer
+├── driver_manager.py     # Driver setup dialog
+├── analytics.py          # Risk scoring and trend analysis
+├── requirements.txt      # Python dependencies
+├── fatigue.db            # SQLite database (auto-created)
+├── wakemate.log          # Application log (auto-created)
+├── clips/                # Drowsiness video clips
+├── sound.wav             # Eye/head/distraction alarm
+└── music.wav             # Yawn alarm
+```
 
 ---
 
 ## License
 
-This project is licensed under the MIT License.
+This project is released for educational and research purposes.  
+See the original repository for licensing details.

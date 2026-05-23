@@ -1,5 +1,6 @@
 # Large binary model files
 shape_predictor_68_face_landmarks.dat
+shape_predictor_68_face_landmarks.dat.bz2
 
 # Python
 __pycache__/
@@ -21,3 +22,11 @@ Thumbs.db
 fatigue.db
 clips/
 session_*.json
+exports/
+
+# Application log (rotating, auto-created)
+wakemate.log
+wakemate.log.*
+
+# Generated app icon (created by generate_icon.py on first run)
+icon.png
