@@ -58,7 +58,7 @@ def run_driver_setup() -> tuple[int, str, str]:
 
     root = tk.Tk()
     root.title("WAKEMATE — Driver Setup")
-    root.geometry("400x350")
+    root.geometry("400x430")
     root.configure(bg=C_BG)
     root.resizable(False, False)
     root.eval("tk::PlaceWindow . center")
@@ -132,7 +132,7 @@ def run_driver_setup() -> tuple[int, str, str]:
              font=FONT_SMALL, bg=C_PANEL, fg=C_GRAY).pack(anchor="w", pady=(0, 8))
 
     list_frame = tk.Frame(panel_existing, bg=C_PANEL)
-    list_frame.pack(fill=tk.BOTH, expand=True)
+    list_frame.pack(fill=tk.BOTH, expand=False)
 
     scrollbar = tk.Scrollbar(list_frame, orient=tk.VERTICAL)
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -145,7 +145,7 @@ def run_driver_setup() -> tuple[int, str, str]:
         activestyle="none", bd=0, highlightthickness=1,
         highlightcolor=C_CYAN, highlightbackground=C_PANEL,
         yscrollcommand=scrollbar.set,
-        height=6,
+        height=4,
     )
     driver_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     scrollbar.config(command=driver_listbox.yview)
