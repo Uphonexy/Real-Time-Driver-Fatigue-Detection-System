@@ -106,16 +106,12 @@ def get_session_summary(session_id: int) -> dict:
     }
     try:
         # Fetch session row directly
-        conn = _db._get_conn()
-        cur  = conn.cursor()
-        cur.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
-        sess_row = cur.fetchone()
-        conn.close()
+        sess_row = _db.get_session_by_id(session_id)
 
         if sess_row is None:
             return default
 
-        sess = dict(sess_row)
+        sess = sess_row
 
         # Driver info
         driver = get_driver_by_id(sess.get("driver_id", 0)) or {}

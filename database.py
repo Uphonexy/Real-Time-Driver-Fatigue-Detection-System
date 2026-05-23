@@ -88,10 +88,20 @@ def recover_orphaned_sessions():
         for sid in orphans:
             try:
                 risk = compute_risk_score(sid)
+                
+                # Fetch recovered drive mins
+                conn2 = _get_conn()
+                cur2 = conn2.cursor()
+                cur2.execute(
+                    "SELECT COALESCE(MAX(drive_minute), 0.0) FROM events WHERE session_id = ?", (sid,)
+                )
+                recovered_mins = cur2.fetchone()[0] or 0.0
+                conn2.close()
+
                 close_session(
                     session_id       = sid,
                     end_time         = datetime.now().isoformat(),
-                    total_drive_mins = 0.0,
+                    total_drive_mins = recovered_mins,
                     baseline_ear     = 0.0,
                     baseline_mar     = 0.0,
                     risk_score       = risk,
@@ -204,6 +214,19 @@ def close_session(
         conn.close()
     except Exception as e:
         print(f"[DB WARNING] close_session failed: {e}")
+
+
+def get_session_by_id(session_id: int) -> dict | None:
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+        row = cur.fetchone()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"[DB WARNING] get_session_by_id failed: {e}")
+        return None
 
 
 def get_sessions_for_driver(driver_id: int) -> list[dict]:

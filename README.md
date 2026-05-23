@@ -173,7 +173,7 @@ MAR = (Y1 + Y2) / (2 · X)    where X = mouth width
 
 ### Head Pose
 Solved via `cv2.solvePnP` with 14 facial landmarks:
-- **Head down** → pitch angle X > 10°
+- **Head down** → pitch angle X > 12°
 - **Distracted** → yaw angle |Y| > 20°
 
 ### Adaptive Thresholds

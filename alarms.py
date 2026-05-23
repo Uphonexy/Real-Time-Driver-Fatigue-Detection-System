@@ -21,7 +21,8 @@ last_alarm_times: dict[str, float] = {
 }
 
 def can_sound_alarm(alarm_type: str) -> bool:
-    if time.time() - last_alarm_times[alarm_type] > 5.0:
+    last_time = last_alarm_times.get(alarm_type, 0.0)
+    if time.time() - last_time > 5.0:
         last_alarm_times[alarm_type] = time.time()
         return True
     return False

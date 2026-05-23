@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import time
 import sys
+import threading
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -74,7 +75,6 @@ class FrameResult:
     calibration_complete: bool  = False
     yawns:                int   = 0
     drive_seconds:        float = 0.0
-    new_alerts:           list  = field(default_factory=list)
     break_reminder:       bool  = False
 
 # ── Engine ────────────────────────────────────────────────────────────────────
@@ -107,6 +107,7 @@ class DetectionEngine:
         self._drive_start_time    = time.time()
         self._total_paused_secs   = 0.0
         self._pause_start_time: Optional[float] = None
+        self._timing_lock         = threading.Lock()
 
         self._paused  = False
         self._stopped = False
@@ -133,6 +134,7 @@ class DetectionEngine:
         self.yawn_timestamps: list[float] = []
         self._mar_history: list[float]    = []
         self._last_yawn_end_time = 0.0
+        self._last_yawn_alarm_time = 0.0
 
         self._head_down_start: Optional[float]  = None
         self._distracted_start: Optional[float] = None
@@ -227,40 +229,42 @@ class DetectionEngine:
         return False, None
 
     def pause(self):
-        if not self._paused:
-            self._paused = True
-            self._pause_start_time = time.time()
-            _log.info("Detection paused.")
+        with self._timing_lock:
+            if not self._paused:
+                self._paused = True
+                self._pause_start_time = time.time()
+                _log.info("Detection paused.")
 
     def resume(self):
-        if self._paused:
-            if self._pause_start_time is not None:
-                self._total_paused_secs += time.time() - self._pause_start_time
-                self._pause_start_time = None
-            self._paused = False
-            self._eye_closed_start = None
-            self._eye_event_logged = False
-            self._yawn_start       = None
-            self._yawn_counted     = False
-            self._yawn_status      = False
-            self._head_down_start  = None
-            self._distracted_start = None
-            self._ear_history.clear()
-            self._mar_history.clear()
-            _log.info("Detection resumed.")
+        with self._timing_lock:
+            if self._paused:
+                if self._pause_start_time is not None:
+                    self._total_paused_secs += time.time() - self._pause_start_time
+                    self._pause_start_time = None
+                self._paused = False
+                self._eye_closed_start = None
+                self._eye_event_logged = False
+                self._yawn_start       = None
+                self._yawn_counted     = False
+                self._yawn_status      = False
+                self._head_down_start  = None
+                self._distracted_start = None
+                self._ear_history.clear()
+                self._mar_history.clear()
+                _log.info("Detection resumed.")
 
     def stop(self):
         self._stopped = True
         _log.info("Detection stop requested.")
 
     def get_active_drive_seconds(self) -> float:
-        elapsed = time.time() - self._drive_start_time - self._total_paused_secs
-        if self._paused and self._pause_start_time is not None:
-            elapsed -= (time.time() - self._pause_start_time)
+        with self._timing_lock:
+            elapsed = time.time() - self._drive_start_time - self._total_paused_secs
+            if self._paused and self._pause_start_time is not None:
+                elapsed -= (time.time() - self._pause_start_time)
         return max(0.0, elapsed)
 
     def _fire_alert(self, alert_type: str, description: str, result: FrameResult):
-        result.new_alerts.append({"type": alert_type, "desc": description})
         if self._alert_cb is not None:
             try:
                 self._alert_cb(alert_type, description)
@@ -283,6 +287,7 @@ class DetectionEngine:
         frame = imutils.resize(frame, width=640)
         frame_height, frame_width = frame.shape[:2]
         current_time = time.time()
+        has_alert = False
 
         current_drive_seconds = self.get_active_drive_seconds()
         drive_minutes = current_drive_seconds / 60
@@ -387,6 +392,7 @@ class DetectionEngine:
 
         gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         rects = self._dlib_detector(gray, 0)
+        rects = rects[:1]
 
         if len(rects) == 0:
             self._no_face_counter += 1
@@ -470,6 +476,7 @@ class DetectionEngine:
                                 (10, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
                     if hd_elapsed >= HEAD_DOWN_DURATION_THRESH:
                         sound_head_down_alarm()
+                        has_alert = True
                         if current_time - self._last_head_down_log >= LOG_COOLDOWN:
                             self._logger.log_event(
                                 "head_down", drive_minutes, xx, self._HEAD_PITCH_THRESH)
@@ -489,6 +496,7 @@ class DetectionEngine:
                                 (10, 290), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
                     if dist_elapsed >= DISTRACTED_DURATION_THRESH:
                         sound_distracted_alarm()
+                        has_alert = True
                         if current_time - self._last_distracted_log >= LOG_COOLDOWN:
                             self._logger.log_event(
                                 "distracted", drive_minutes, yy, self._DISTRACTION_YAW_THRESH)
@@ -518,6 +526,7 @@ class DetectionEngine:
                         cv2.putText(frame, "DROWSINESS ALERT!",
                                     (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 0, 255), 3)
                         sound_eyes_closed_alarm()
+                        has_alert = True
 
                         clip_path = None
                         if not self._clip_recorder.is_recording():
@@ -580,20 +589,19 @@ class DetectionEngine:
             if len(self.yawn_timestamps) >= 3 and not self._calibrating:
                 cv2.putText(frame, "DROWSINESS ALERT!",
                             (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 0, 255), 3)
-                sound_yawning_alarm()
-                self._logger.log_event(
-                    "yawn_detected", drive_minutes, smoothed_mar, self._MOU_AR_THRESH)
-                self._fire_alert("yawn_detected", "3 yawns detected", result)
-                self.yawn_timestamps.clear()
+                if current_time - self._last_yawn_alarm_time >= LOG_COOLDOWN:
+                    sound_yawning_alarm()
+                    self._logger.log_event(
+                        "yawn_detected", drive_minutes, smoothed_mar, self._MOU_AR_THRESH)
+                    self._fire_alert("yawn_detected", "3 yawns detected", result)
+                    self._last_yawn_alarm_time = current_time
+                    self.yawn_timestamps.clear()
+                has_alert = True
 
             cv2.putText(frame, f"MAR: {mou_ear:.3f}",
                         (480, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
 
         if not self._calibrating:
-            has_alert = any(
-                a["type"] not in ("system",)
-                for a in result.new_alerts
-            ) or result.eye_status == "ALERT"
             result.status_str = "ALERT" if has_alert else "ACTIVE"
         else:
             result.status_str = "CALIBRATING"
@@ -641,14 +649,15 @@ class DetectionEngine:
         if self._cap is not None and self._cap.isOpened():
             self._cap.release()
 
-        if self._paused and self._pause_start_time is not None:
-            self._total_paused_secs += time.time() - self._pause_start_time
-            self._pause_start_time = None
-            self._paused = False
+        with self._timing_lock:
+            if self._paused and self._pause_start_time is not None:
+                self._total_paused_secs += time.time() - self._pause_start_time
+                self._pause_start_time = None
+                self._paused = False
 
-        total_drive_mins = round(
-            (time.time() - self._drive_start_time - self._total_paused_secs) / 60, 2
-        )
+            total_drive_mins = round(
+                (time.time() - self._drive_start_time - self._total_paused_secs) / 60, 2
+            )
 
         risk_score = None
         if self.session_id is not None:

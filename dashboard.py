@@ -706,6 +706,57 @@ class DashboardApp:
         self.btn_stop.config(state=tk.DISABLED)
         # Auto-refresh history after DB has had time to write
         self.root.after(900, self._refresh_history)
+        
+        # After 1 second, allow starting a new session
+        self.root.after(1000, lambda: self.btn_start.config(
+            text="▶ New Session",
+            command=self._cmd_new_session,
+            state=tk.NORMAL
+        ))
+
+    def _cmd_new_session(self):
+        # Create a new session in DB
+        new_session_id = None
+        if self.driver_id != -1 and not NO_DB_MODE:
+            new_session_id = create_session(self.driver_id, self.age_group, datetime.now().isoformat())
+        self.session_id = new_session_id
+
+        # Reset all relevant shared_state keys back to their initial values
+        with state_lock:
+            shared_state["frame"] = None
+            shared_state["ear"] = 0.0
+            shared_state["mar"] = 0.0
+            shared_state["eye_status"] = "Open"
+            shared_state["mouth_status"] = "Closed"
+            shared_state["face_detected"] = True
+            shared_state["yawns"] = 0
+            shared_state["drive_seconds"] = 0.0
+            shared_state["calibrating"] = True
+            shared_state["calib_remaining"] = 30
+            shared_state["paused"] = False
+            shared_state["stopped"] = False
+            shared_state["ear_thresh"] = 0.0
+            shared_state["mar_thresh"] = 0.0
+            shared_state["recent_alerts"] = []
+            shared_state["status_str"] = "CALIBRATING"
+            shared_state["alert_active"] = False
+            shared_state["calibration_complete_time"] = 0
+            shared_state["active_drive_seconds"] = 0.0
+            shared_state["break_reminder_shown"] = False
+            shared_state["camera_error"] = None
+
+        # Start a fresh camera thread
+        bg_thread = threading.Thread(
+            target=camera_thread_func,
+            args=(self.driver_id, self.driver_name, self.age_group, self.session_id),
+            daemon=True,
+        )
+        bg_thread.start()
+
+        # Update button states
+        self.btn_start.config(text="▶ Start", command=self._cmd_start, state=tk.NORMAL)
+        self.btn_pause.config(state=tk.NORMAL)
+        self.btn_stop.config(state=tk.NORMAL)
 
     def _on_closing(self):
         self._cmd_stop()

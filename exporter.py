@@ -45,9 +45,8 @@ def export_session_json(session_id: int, output_path: str) -> str:
             for ev in events
         ],
     }
-    dirname = os.path.dirname(output_path)
-    if dirname:
-        os.makedirs(dirname, exist_ok=True)
+    dirname = os.path.dirname(os.path.abspath(output_path))
+    os.makedirs(dirname, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=4)
     _log.info("Session %d exported to JSON: %s", session_id, output_path)
@@ -59,9 +58,8 @@ def export_session_csv(session_id: int, output_path: str) -> str:
         raise RuntimeError(f"Could not retrieve events for session {session_id}.")
     fieldnames = ["session_id","event_type","timestamp","drive_minute",
                   "metric_value","threshold_value","clip_path"]
-    dirname = os.path.dirname(output_path)
-    if dirname:
-        os.makedirs(dirname, exist_ok=True)
+    dirname = os.path.dirname(os.path.abspath(output_path))
+    os.makedirs(dirname, exist_ok=True)
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
