@@ -67,8 +67,40 @@ def init_db():
         conn.commit()
         conn.close()
         print("[DB] Database initialised →", _DB_PATH)
+        recover_orphaned_sessions()
     except Exception as e:
         print(f"[DB WARNING] init_db failed: {e}")
+
+
+def recover_orphaned_sessions():
+    """
+    At startup, find sessions with null end_time (caused by crashes or forced
+    kills) and close them using their existing events to compute a risk score.
+    Prevents ghost sessions appearing in the History tab.
+    """
+    try:
+        from analytics import compute_risk_score
+        conn = _get_conn()
+        cur  = conn.cursor()
+        cur.execute("SELECT id FROM sessions WHERE end_time IS NULL")
+        orphans = [row["id"] for row in cur.fetchall()]
+        conn.close()
+        for sid in orphans:
+            try:
+                risk = compute_risk_score(sid)
+                close_session(
+                    session_id       = sid,
+                    end_time         = datetime.now().isoformat(),
+                    total_drive_mins = 0.0,
+                    baseline_ear     = 0.0,
+                    baseline_mar     = 0.0,
+                    risk_score       = risk,
+                )
+                print(f"[DB] Recovered orphaned session {sid} (risk={risk})")
+            except Exception as e:
+                print(f"[DB WARNING] Could not recover session {sid}: {e}")
+    except Exception as e:
+        print(f"[DB WARNING] recover_orphaned_sessions failed: {e}")
 
 
 # ──────────────────────────────────────────────

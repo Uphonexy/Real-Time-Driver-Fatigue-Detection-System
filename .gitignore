@@ -1,8 +1,5 @@
-# Large binary model files
 shape_predictor_68_face_landmarks.dat
 shape_predictor_68_face_landmarks.dat.bz2
-
-# Python
 __pycache__/
 *.py[cod]
 *.pyo
@@ -10,23 +7,13 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-
-# Jupyter
 .ipynb_checkpoints/
-
-# OS
 .DS_Store
 Thumbs.db
-
-# Runtime-generated data (never commit)
 fatigue.db
 clips/
 session_*.json
 exports/
-
-# Application log (rotating, auto-created)
 wakemate.log
 wakemate.log.*
-
-# Generated app icon (created by generate_icon.py on first run)
 icon.png

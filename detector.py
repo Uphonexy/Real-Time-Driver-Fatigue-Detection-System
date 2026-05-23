@@ -62,7 +62,8 @@ def get_head_pose(shape, frame_width, frame_height):
     ])
 
     _, rotation_vec, translation_vec = cv2.solvePnP(
-        object_pts, image_pts, cam_matrix, dist_coeffs
+        object_pts, image_pts, cam_matrix, dist_coeffs,
+        flags=cv2.SOLVEPNP_EPNP
     )
 
     reprojectdst, _ = cv2.projectPoints(

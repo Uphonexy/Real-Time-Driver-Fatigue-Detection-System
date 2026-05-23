@@ -12,6 +12,7 @@ Launch with:
     python main.py
 """
 
+import os
 import sys
 import time
 from datetime import datetime
@@ -72,6 +73,11 @@ def main():
 
     _log.info("Running… Press 'q' to quit, 'p' to pause/resume.")
 
+    # ── FPS Tracking ──────────────────────────────────────────────────────────
+    fps_frame_count = 0
+    fps_last_time   = time.time()
+    fps_display     = 0.0
+
     # ── Main display loop ─────────────────────────────────────────────────────
     try:
         while True:
@@ -80,6 +86,16 @@ def main():
             if result is None:
                 _log.error("Camera failed — exiting.")
                 break
+
+            fps_frame_count += 1
+            if fps_frame_count >= 30:
+                now = time.time()
+                fps_display     = fps_frame_count / (now - fps_last_time)
+                fps_last_time   = now
+                fps_frame_count = 0
+
+            cv2.putText(result.frame, f"FPS: {fps_display:.1f}",
+                        (450, 445), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
 
             cv2.imshow("WakeMate — Driver Fatigue Detection", result.frame)
 

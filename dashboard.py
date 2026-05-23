@@ -36,7 +36,7 @@ except ImportError:
 from pygame import mixer
 
 from app_logger import get_logger
-from database import init_db, create_session, get_sessions_for_driver
+from database import init_db, create_session, get_sessions_for_driver, get_events_for_session
 from driver_manager import run_driver_setup, NO_DB_MODE
 from detection_engine import DetectionEngine, FrameResult
 from analytics import compute_risk_score, get_risk_label
@@ -62,7 +62,7 @@ shared_state = {
     "yawns":                   0,
     "drive_seconds":           0.0,
     "calibrating":             True,
-    "calib_remaining":         30,
+    "calib_remaining":         300,
     "paused":                  False,
     "stopped":                 False,
     "ear_thresh":              0.0,
@@ -537,7 +537,6 @@ class DashboardApp:
                                          values=("No sessions yet", "", "", "", "", "", ""))
                 return
 
-            from database import get_events_for_session
             for s in sessions:
                 sid       = s.get("id", 0)
                 start     = (s.get("start_time") or "")[:16].replace("T", "  ")
@@ -648,7 +647,6 @@ class DashboardApp:
             return
 
         try:
-            from database import get_events_for_session
             evts = get_events_for_session(sid)
             clip_paths = [
                 e.get("clip_path") for e in evts

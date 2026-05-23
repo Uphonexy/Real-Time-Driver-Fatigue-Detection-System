@@ -11,9 +11,12 @@ deprecated main.py both work without changes.
 """
 
 from datetime import datetime
-from app_logger import get_logger
-
-_log = get_logger("session_logger")
+try:
+    from app_logger import get_logger as _get_logger
+    _log = _get_logger("session_logger")
+except ImportError:
+    import logging
+    _log = logging.getLogger("session_logger")
 
 # DB import is optional — guarded so logger.py can still be imported
 # even if database.py is not present.

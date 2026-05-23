@@ -1,27 +1,7 @@
 """
 detection_engine.py — Core fatigue detection logic for WakeMate v2.0.
-
-Extracts the ~200-line detection loop that was previously duplicated
-identically in both main.py (OpenCV mode) and dashboard.py (Tkinter mode)
-into a single, well-structured DetectionEngine class.
-
-Both entry points now instantiate this class and call process_frame() each
-iteration.  They are responsible only for their own UI rendering and input
-handling.
-
-Public API
-----------
-engine = DetectionEngine(driver_id, driver_name, age_group, session_id,
-                         alert_callback=None)
-engine.open_camera()               # must call before process_frame
-result = engine.process_frame()    # FrameResult or None on paused/stopped
-engine.pause()
-engine.resume()
-engine.stop()
-engine.get_active_drive_seconds()  # pause-corrected elapsed time
-engine.finalize()                  # cleanup at session end
+Extracted into a single class to avoid duplication between main.py and dashboard.py.
 """
-
 from __future__ import annotations
 
 import os
@@ -52,7 +32,7 @@ from clip_recorder import ClipRecorder, cleanup_old_clips
 _log = get_logger("engine")
 
 # ── Tunable constants ─────────────────────────────────────────────────────────
-CALIBRATION_DURATION       = 30    # seconds
+CALIBRATION_DURATION       = 300   # 5 minutes for production
 EYE_CLOSED_DURATION_THRESH = 1.5   # seconds before drowsiness alarm
 YAWN_DURATION_THRESH       = 1.5   # seconds of continuous open mouth
 NO_FACE_FRAME_LIMIT        = 90    # frames before "face not detected" banner
@@ -60,8 +40,9 @@ MAX_CONSECUTIVE_FAILURES   = 30    # consecutive bad reads before giving up
 LOG_COOLDOWN               = 3.0   # seconds between repeated event DB writes
 ADAPTIVE_THRESH_INTERVAL   = 1800  # seconds between adaptive recalculations
 BREAK_REMINDER_MINUTES     = 120   # drive time before break reminder fires
+YAWN_WINDOW_SECS           = 600   # 10-minute sliding window
 
-# Camera attempts (index, backend, label)
+# Camera attempts (indices 0-2 × CAP_DSHOW / CAP_MSMF / CAP_ANY)
 _CAMERA_ATTEMPTS = [
     (0, cv2.CAP_DSHOW, "index 0 + DirectShow"),
     (1, cv2.CAP_DSHOW, "index 1 + DirectShow"),
@@ -72,105 +53,67 @@ _CAMERA_ATTEMPTS = [
     (1, cv2.CAP_ANY,   "index 1 + Auto"),
 ]
 
-
 # ── Result dataclass ──────────────────────────────────────────────────────────
 
 @dataclass
 class FrameResult:
     """All information the UI layer needs after one detection cycle."""
-
-    # Annotated frame (BGR numpy array) ready for display
-    frame:             np.ndarray
-
-    # Biometric readings (0.0 when no face)
-    ear:               float = 0.0
-    mar:               float = 0.0
-    ear_thresh:        float = 0.0
-    mar_thresh:        float = 0.0
-
-    # Status strings
-    eye_status:        str   = "Open"     # "Open" | "Closed" | "ALERT" | "N/A"
-    mouth_status:      str   = "Closed"   # "Closed" | "Yawning..." | "N/A"
-    status_str:        str   = "ACTIVE"   # "CALIBRATING" | "PAUSED" | "ACTIVE" | "ALERT"
-
-    # State flags
-    face_detected:     bool  = True
-    calibrating:       bool  = True
-    calib_remaining:   int   = 0
-    calibration_complete: bool = False    # True for exactly one frame after calib ends
-
-    # Counters
-    yawns:             int   = 0
-    drive_seconds:     float = 0.0
-
-    # Alerts (new ones generated this frame)
-    new_alerts:        list  = field(default_factory=list)  # [{type, desc}]
-
-    # Break reminder (fires once at 120 min)
-    break_reminder:    bool  = False
-
+    frame:                np.ndarray
+    ear:                  float = 0.0
+    mar:                  float = 0.0
+    ear_thresh:           float = 0.0
+    mar_thresh:           float = 0.0
+    eye_status:           str   = "Open"
+    mouth_status:         str   = "Closed"
+    status_str:           str   = "ACTIVE"
+    face_detected:        bool  = True
+    calibrating:          bool  = True
+    calib_remaining:      int   = 0
+    calibration_complete: bool  = False
+    yawns:                int   = 0
+    drive_seconds:        float = 0.0
+    new_alerts:           list  = field(default_factory=list)
+    break_reminder:       bool  = False
 
 # ── Engine ────────────────────────────────────────────────────────────────────
 
 class DetectionEngine:
     """
-    Encapsulates the camera, Dlib model, calibration, threshold adaptation,
-    event logging, and clip recording.  Thread-safe to the extent that
-    pause/resume/stop use simple boolean flags — fine for a single producer
-    thread (the camera thread) and a single consumer thread (the UI).
+    Encapsulates camera, landmarks, calibration, adaptation, logging, and clip recording.
     """
-
     def __init__(
         self,
-        driver_id:        int,
-        driver_name:      str,
-        age_group:        str,
-        session_id:       Optional[int],
-        alert_callback:   Optional[Callable[[str, str], None]] = None,
+        driver_id:      int,
+        driver_name:    str,
+        age_group:      str,
+        session_id:     Optional[int],
+        alert_callback: Optional[Callable[[str, str], None]] = None,
     ):
-        """
-        Parameters
-        ----------
-        driver_id      : DB driver id (may be -1 in No-DB mode)
-        driver_name    : Human-readable name for logging
-        age_group      : One of "18-30", "31-45", "46-60", "60+"
-        session_id     : DB session id (may be None in No-DB mode)
-        alert_callback : optional fn(alert_type, description) called on each
-                         new alert — used by the dashboard to populate the
-                         Alerts panel without the engine knowing about Tkinter
-        """
         self.driver_id    = driver_id
         self.driver_name  = driver_name
         self.age_group    = age_group
         self.session_id   = session_id
         self._alert_cb    = alert_callback
 
-        # ── Camera ───────────────────────────────────────────────────────
         self._cap: Optional[cv2.VideoCapture] = None
-
-        # ── Dlib (loaded lazily in open_camera) ──────────────────────────
         self._dlib_detector  = None
         self._dlib_predictor = None
         self._lStart = self._lEnd = 0
         self._rStart = self._rEnd = 0
         self._mStart = self._mEnd = 0
 
-        # ── Drive timing ─────────────────────────────────────────────────
         self._drive_start_time    = time.time()
         self._total_paused_secs   = 0.0
         self._pause_start_time: Optional[float] = None
 
-        # ── State flags ───────────────────────────────────────────────────
         self._paused  = False
         self._stopped = False
 
-        # ── Calibration ───────────────────────────────────────────────────
-        self._calibrating         = True
-        self._ear_samples: list   = []
-        self._mar_samples: list   = []
-        self._calibration_end_time= 0.0
+        self._calibrating          = True
+        self._ear_samples: list    = []
+        self._mar_samples: list    = []
+        self._calibration_end_time = 0.0
 
-        # ── Thresholds ────────────────────────────────────────────────────
         self._personal_baseline_ear = 0.25
         self._personal_baseline_mar = 0.65
         self._EYE_AR_THRESH         = 0.24
@@ -179,33 +122,25 @@ class DetectionEngine:
         self._DISTRACTION_YAW_THRESH= 20
         self._last_threshold_update = -ADAPTIVE_THRESH_INTERVAL
 
-        # ── Eye closure tracking ──────────────────────────────────────────
         self._eye_closed_start: Optional[float] = None
-        self._eye_event_logged  = False
+        self._eye_event_logged = False
 
-        # ── Yawn tracking ─────────────────────────────────────────────────
         self._yawn_start: Optional[float] = None
         self._yawn_counted   = False
         self._yawn_status    = False
-        self._yawns          = 0
+        self.yawn_timestamps: list[float] = []
 
-        # ── Face-loss tracking ────────────────────────────────────────────
         self._no_face_counter      = 0
         self._consecutive_failures = 0
 
-        # ── Cooldown timers ───────────────────────────────────────────────
         self._last_head_down_log   = 0.0
         self._last_distracted_log  = 0.0
-
-        # ── Break reminder ────────────────────────────────────────────────
         self._break_reminder_sent  = False
 
-        # ── Session logger ────────────────────────────────────────────────
         self._logger = SessionLogger(age_group)
         if session_id is not None:
             self._logger.set_session_id(session_id)
 
-        # ── Clip recorder ─────────────────────────────────────────────────
         self._clip_recorder = ClipRecorder()
         try:
             cleanup_old_clips()
@@ -217,23 +152,18 @@ class DetectionEngine:
             driver_name, age_group, session_id,
         )
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Camera management
-    # ─────────────────────────────────────────────────────────────────────────
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
+
+    @property
+    def is_stopped(self) -> bool:
+        return self._stopped
 
     def open_camera(self) -> cv2.VideoCapture:
-        """
-        Try multiple camera backends/indices and return the first working one.
-        Also loads the Dlib model.  Raises FileNotFoundError if the .dat model
-        is missing.  Calls sys.exit(1) if no camera works.
-        """
-        # Fix 7 — friendly error if landmark model is missing
         model_path = "shape_predictor_68_face_landmarks.dat"
         if not os.path.exists(model_path):
-            msg = (
-                f"'{model_path}' not found.\n"
-                "Run: python download_model.py"
-            )
+            msg = f"'{model_path}' not found. Run: python download_model.py"
             _log.error(msg)
             raise FileNotFoundError(msg)
 
@@ -251,7 +181,6 @@ class DetectionEngine:
                 cap = cv2.VideoCapture(idx, backend)
                 if not cap.isOpened():
                     cap.release()
-                    _log.warning("%s — could not open.", label)
                     continue
 
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
@@ -261,7 +190,6 @@ class DetectionEngine:
 
                 time.sleep(3.0)
 
-                # Fix 4 — plain loop replaces lambda-in-generator anti-pattern
                 success_count = 0
                 for _ in range(10):
                     ret_t, frm_t = cap.read()
@@ -275,11 +203,6 @@ class DetectionEngine:
                     return cap
 
                 cap.release()
-                _log.warning(
-                    "%s — opened but frames black/unreadable (%d/10).",
-                    label, success_count,
-                )
-
             except Exception as exc:
                 _log.warning("%s — exception: %s", label, exc)
 
@@ -288,7 +211,6 @@ class DetectionEngine:
 
     @staticmethod
     def _read_frame_safe(cap: cv2.VideoCapture, retries: int = 3):
-        """Read a frame with retry logic. Returns (True, frame) or (False, None)."""
         for _ in range(retries):
             ret, frame = cap.read()
             if ret and frame is not None and frame.size > 0:
@@ -296,25 +218,18 @@ class DetectionEngine:
             time.sleep(0.05)
         return False, None
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # State controls (thread-safe for simple boolean writes)
-    # ─────────────────────────────────────────────────────────────────────────
-
     def pause(self):
-        """Pause detection and accumulate pause time."""
         if not self._paused:
             self._paused = True
             self._pause_start_time = time.time()
             _log.info("Detection paused.")
 
     def resume(self):
-        """Resume detection after a pause."""
         if self._paused:
             if self._pause_start_time is not None:
                 self._total_paused_secs += time.time() - self._pause_start_time
                 self._pause_start_time = None
             self._paused = False
-            # Reset short-term trackers so stale state doesn't trigger alerts
             self._eye_closed_start = None
             self._eye_event_logged = False
             self._yawn_start       = None
@@ -322,32 +237,14 @@ class DetectionEngine:
             _log.info("Detection resumed.")
 
     def stop(self):
-        """Signal the engine to halt on the next frame."""
         self._stopped = True
         _log.info("Detection stop requested.")
 
-    @property
-    def is_paused(self) -> bool:
-        return self._paused
-
-    @property
-    def is_stopped(self) -> bool:
-        return self._stopped
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Drive time
-    # ─────────────────────────────────────────────────────────────────────────
-
     def get_active_drive_seconds(self) -> float:
-        """Return elapsed drive time excluding paused periods."""
         elapsed = time.time() - self._drive_start_time - self._total_paused_secs
         if self._paused and self._pause_start_time is not None:
             elapsed -= (time.time() - self._pause_start_time)
         return max(0.0, elapsed)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Alert helper
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _fire_alert(self, alert_type: str, description: str, result: FrameResult):
         result.new_alerts.append({"type": alert_type, "desc": description})
@@ -357,17 +254,7 @@ class DetectionEngine:
             except Exception:
                 pass
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Main processing loop — call once per video frame
-    # ─────────────────────────────────────────────────────────────────────────
-
     def process_frame(self) -> Optional[FrameResult]:
-        """
-        Read one frame from the camera, run detection, and return a FrameResult.
-
-        Returns None if the camera has failed too many consecutive times
-        (caller should treat this as a signal to terminate the loop).
-        """
         if self._cap is None:
             raise RuntimeError("open_camera() must be called before process_frame()")
 
@@ -380,14 +267,10 @@ class DetectionEngine:
             return FrameResult(frame=np.zeros((480, 640, 3), dtype=np.uint8))
 
         self._consecutive_failures = 0
-
         frame = imutils.resize(frame, width=640)
         frame_height, frame_width = frame.shape[:2]
         current_time = time.time()
 
-        # Fix 1 — pause accounting is handled exclusively by pause()/resume();
-        # the redundant tracking block that was here caused double-subtraction
-        # in get_active_drive_seconds() and has been removed.
         current_drive_seconds = self.get_active_drive_seconds()
         drive_minutes = current_drive_seconds / 60
 
@@ -397,10 +280,9 @@ class DetectionEngine:
             mar_thresh     = self._MOU_AR_THRESH,
             calibrating    = self._calibrating,
             drive_seconds  = current_drive_seconds,
-            yawns          = self._yawns,
+            yawns          = len(self.yawn_timestamps),
         )
 
-        # ── PAUSED overlay ────────────────────────────────────────────────
         if self._paused:
             overlay = frame.copy()
             cv2.rectangle(overlay, (0, 0), (frame_width, frame_height), (0, 0, 0), -1)
@@ -412,14 +294,10 @@ class DetectionEngine:
             result.status_str = "PAUSED"
             result.eye_status = "N/A"
             result.mouth_status = "N/A"
-            # Reset short-term trackers
             self._eye_closed_start = None
             self._yawn_start       = None
             return result
 
-        # ── Break reminder (fires once at 120 min of EFFECTIVE drive time) ─
-        # Fix 13 — subtract calibration duration so the reminder doesn't fire
-        # ~5 minutes early due to calibration time being counted.
         effective_drive_minutes = max(0.0, (current_drive_seconds - CALIBRATION_DURATION) / 60)
         if effective_drive_minutes >= BREAK_REMINDER_MINUTES and not self._break_reminder_sent:
             self._break_reminder_sent = True
@@ -427,7 +305,6 @@ class DetectionEngine:
             _log.warning("⚠ 2hr effective drive — consider a break")
             self._fire_alert("system", "⚠ 2hr drive — consider a break", result)
 
-        # ── Calibration phase ─────────────────────────────────────────────
         if self._calibrating:
             remaining = int(CALIBRATION_DURATION - current_drive_seconds)
             result.calib_remaining = max(0, remaining)
@@ -447,7 +324,6 @@ class DetectionEngine:
                 result.calibration_complete = True
                 result.calibrating = False
 
-        # Show calibration complete banner for 5 s
         if not self._calibrating and current_time - self._calibration_end_time < 5:
             cv2.putText(
                 frame,
@@ -455,7 +331,6 @@ class DetectionEngine:
                 (10, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2,
             )
 
-        # ── Adaptive threshold update (every 30 min) ──────────────────────
         if (not self._calibrating and
                 current_drive_seconds - self._last_threshold_update >= ADAPTIVE_THRESH_INTERVAL):
             self._EYE_AR_THRESH = compute_adaptive_threshold(
@@ -470,17 +345,16 @@ class DetectionEngine:
         result.ear_thresh = self._EYE_AR_THRESH
         result.mar_thresh = self._MOU_AR_THRESH
 
-        # ── HUD overlays ──────────────────────────────────────────────────
         hours   = int(drive_minutes // 60)
         minutes = int(drive_minutes % 60)
-        cv2.putText(frame, f"Drive Time: {hours:02d}:{minutes:02d}",
+        secs    = int(current_drive_seconds % 60)
+        cv2.putText(frame, f"Drive Time: {hours:02d}:{minutes:02d}:{secs:02d}",
                     (450, 460), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         cv2.putText(frame, "P: Pause | Q: Quit",
                     (10, 470), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
         cv2.putText(frame, f"EAR Thresh: {self._EYE_AR_THRESH:.3f}",
                     (450, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        # ── Clip recorder — buffer frames ─────────────────────────────────
         if not self._calibrating:
             completed = self._clip_recorder.add_frame(frame)
             if completed:
@@ -492,7 +366,6 @@ class DetectionEngine:
             except Exception:
                 pass
 
-        # ── Face detection ────────────────────────────────────────────────
         gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         rects = self._dlib_detector(gray, 0)
 
@@ -514,7 +387,6 @@ class DetectionEngine:
         else:
             self._no_face_counter = 0
 
-        # ── Per-face detection ─────────────────────────────────────────────
         for rect in rects:
             shape = self._dlib_predictor(gray, rect)
             shape = face_utils.shape_to_np(shape)
@@ -531,15 +403,14 @@ class DetectionEngine:
             result.ear = ear
             result.mar = mou_ear
 
-            # Collect calibration samples
+            # Collect calibration samples - filter out mid-blinks
             if self._calibrating:
-                self._ear_samples.append(ear)
+                if ear > 0.20:
+                    self._ear_samples.append(ear)
                 self._mar_samples.append(mou_ear)
 
-            # Head pose
             reprojectdst, euler_angle = get_head_pose(shape, frame_width, frame_height)
 
-            # Draw landmarks
             for (x, y) in shape:
                 cv2.circle(frame, (x, y), 1, (0, 0, 255), -1)
             for start_pt, end_pt in line_pairs:
@@ -554,7 +425,6 @@ class DetectionEngine:
             cv2.putText(frame, f"X: {xx:7.2f}", (20, 420), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
             cv2.putText(frame, f"Y: {yy:7.2f}", (20, 445), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
 
-            # ── Head down ─────────────────────────────────────────────────
             if xx > self._HEAD_PITCH_THRESH:
                 cv2.putText(frame, "HEAD DOWN",
                             (10, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
@@ -566,7 +436,6 @@ class DetectionEngine:
                         self._fire_alert("head_down", "Head down", result)
                         self._last_head_down_log = current_time
 
-            # ── Distracted ────────────────────────────────────────────────
             if abs(yy) > self._DISTRACTION_YAW_THRESH:
                 cv2.putText(frame, "DISTRACTED",
                             (10, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
@@ -578,7 +447,6 @@ class DetectionEngine:
                         self._fire_alert("distracted", "Distracted", result)
                         self._last_distracted_log = current_time
 
-            # ── Eye closure ───────────────────────────────────────────────
             if ear < self._EYE_AR_THRESH:
                 result.eye_status = "Closed"
                 cv2.putText(frame, "Eyes Closed",
@@ -601,7 +469,6 @@ class DetectionEngine:
                                     (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 0, 255), 3)
                         sound_eyes_closed_alarm()
 
-                        # Trigger clip
                         clip_path = None
                         if not self._clip_recorder.is_recording():
                             try:
@@ -628,7 +495,7 @@ class DetectionEngine:
             cv2.putText(frame, f"T:   {self._EYE_AR_THRESH:.3f}",
                         (480, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 0), 2)
 
-            # ── Yawn ──────────────────────────────────────────────────────
+            # ── Yawn (Sliding Window logic) ───────────────────────────────
             if mou_ear > self._MOU_AR_THRESH:
                 result.mouth_status = "Yawning..."
                 cv2.putText(frame, "Yawning...",
@@ -644,47 +511,44 @@ class DetectionEngine:
             else:
                 result.mouth_status = "Closed"
                 if self._yawn_status:
-                    self._yawns    += 1
+                    self.yawn_timestamps.append(current_time)
                     self._yawn_status = False
                 self._yawn_start   = None
                 self._yawn_counted = False
 
-            if self._yawns > 0:
-                cv2.putText(frame, f"Yawns: {self._yawns}/3",
+            # Purge yawns outside 10 minutes
+            self.yawn_timestamps = [t for t in self.yawn_timestamps if current_time - t <= YAWN_WINDOW_SECS]
+            result.yawns = len(self.yawn_timestamps)
+
+            if len(self.yawn_timestamps) > 0:
+                cv2.putText(frame, f"Yawns: {len(self.yawn_timestamps)}/3",
                             (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 165, 0), 2)
 
-            if self._yawns >= 3 and not self._calibrating:
+            if len(self.yawn_timestamps) >= 3 and not self._calibrating:
                 cv2.putText(frame, "DROWSINESS ALERT!",
                             (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 0, 255), 3)
                 sound_yawning_alarm()
                 self._logger.log_event(
                     "yawn_detected", drive_minutes, mou_ear, self._MOU_AR_THRESH)
                 self._fire_alert("yawn_detected", "3 yawns detected", result)
-                self._yawns = 0
+                self.yawn_timestamps.clear()
 
             cv2.putText(frame, f"MAR: {mou_ear:.3f}",
                         (480, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
 
-        # ── Status string ─────────────────────────────────────────────────
         if not self._calibrating:
             has_alert = any(
                 a["type"] not in ("system",)
                 for a in result.new_alerts
             ) or result.eye_status == "ALERT"
             result.status_str = "ALERT" if has_alert else "ACTIVE"
-        elif self._calibrating:
+        else:
             result.status_str = "CALIBRATING"
 
         result.frame = frame
-        result.yawns = self._yawns
         return result
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Calibration internals
-    # ─────────────────────────────────────────────────────────────────────────
-
     def _finalize_calibration(self, current_time: float):
-        """Compute baselines from collected samples and update thresholds."""
         self._calibrating         = False
         self._calibration_end_time= current_time
 
@@ -706,36 +570,22 @@ class DetectionEngine:
                 self._MOU_AR_THRESH         = self._personal_baseline_mar
                 self._logger.update_baseline_mar(self._personal_baseline_mar)
 
-        self._last_threshold_update = -ADAPTIVE_THRESH_INTERVAL  # force immediate adaptive update
+        self._last_threshold_update = -ADAPTIVE_THRESH_INTERVAL
         _log.info(
             "Calibration complete — EAR baseline: %.3f  MAR baseline: %.3f",
             self._personal_baseline_ear, self._personal_baseline_mar,
         )
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Cleanup / session end
-    # ─────────────────────────────────────────────────────────────────────────
-
     def finalize(self) -> dict:
-        """
-        Stop clip recording, release camera, compute risk score, close the
-        DB session, and return a summary dict.
-
-        Call this once after the detection loop exits.
-        """
-        # Stop any in-progress recording
         try:
             if self._clip_recorder.is_recording():
                 self._clip_recorder.stop_recording()
         except Exception as e:
             _log.warning("Error stopping clip recorder: %s", e)
 
-        # Release camera
         if self._cap is not None and self._cap.isOpened():
             self._cap.release()
 
-        # Fix 11 — flush a yawn that was confirmed but not yet counted because
-        # the driver's mouth was still open when the session ended.
         if self._yawn_status and not self._calibrating:
             _log.info("Flushing 1 confirmed in-progress yawn at session end.")
             final_drive_mins = self.get_active_drive_seconds() / 60
@@ -746,7 +596,6 @@ class DetectionEngine:
             except Exception as e:
                 _log.warning("Could not log end-of-session yawn: %s", e)
 
-        # Finalise pause accounting
         if self._paused and self._pause_start_time is not None:
             self._total_paused_secs += time.time() - self._pause_start_time
 
@@ -754,7 +603,6 @@ class DetectionEngine:
             (time.time() - self._drive_start_time - self._total_paused_secs) / 60, 2
         )
 
-        # Risk score
         risk_score = None
         if self.session_id is not None:
             try:
@@ -764,7 +612,6 @@ class DetectionEngine:
             except Exception as e:
                 _log.warning("Could not compute risk score: %s", e)
 
-        # Save summary (closes DB session internally)
         self._logger.save_and_print_summary(
             total_drive_mins,
             session_id  = self.session_id,
