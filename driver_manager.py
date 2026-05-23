@@ -54,6 +54,17 @@ def run_driver_setup() -> tuple[int, str, str]:
     """
     global NO_DB_MODE
 
+    # Enable High-DPI awareness on Windows for crisp GUI
+    if sys.platform == "win32":
+        try:
+            from ctypes import windll
+            windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            try:
+                windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
     result = [None]   # mutable container so inner callbacks can write to it
 
     root = tk.Tk()

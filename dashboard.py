@@ -882,7 +882,17 @@ class DashboardApp:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    # Fix 7 — guard for missing landmark model before anything else runs
+    # Enable High-DPI awareness on Windows for crisp GUI
+    if sys.platform == "win32":
+        try:
+            from ctypes import windll
+            windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            try:
+                windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
     model_path = "shape_predictor_68_face_landmarks.dat"
     if not os.path.exists(model_path):
         root_check = tk.Tk()

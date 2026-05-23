@@ -17,7 +17,7 @@ _DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fatigue.db"
 
 def _get_conn():
     """Open and return a new sqlite3 connection with row_factory set."""
-    conn = sqlite3.connect(_DB_PATH)
+    conn = sqlite3.connect(_DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn

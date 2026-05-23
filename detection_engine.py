@@ -554,7 +554,8 @@ class DetectionEngine:
 
         if self._ear_samples:
             self._ear_samples.sort(reverse=True)
-            top_70 = self._ear_samples[:int(len(self._ear_samples) * 0.7)]
+            slice_idx = max(1, int(len(self._ear_samples) * 0.7))
+            top_70 = self._ear_samples[:slice_idx]
             if top_70:
                 open_eye_avg = sum(top_70) / len(top_70)
                 self._personal_baseline_ear = max(0.22, open_eye_avg - 0.05)
@@ -563,7 +564,8 @@ class DetectionEngine:
 
         if self._mar_samples:
             self._mar_samples.sort()
-            bot_70 = self._mar_samples[:int(len(self._mar_samples) * 0.7)]
+            slice_idx = max(1, int(len(self._mar_samples) * 0.7))
+            bot_70 = self._mar_samples[:slice_idx]
             if bot_70:
                 closed_mouth_avg = sum(bot_70) / len(bot_70)
                 self._personal_baseline_mar = closed_mouth_avg + 0.10

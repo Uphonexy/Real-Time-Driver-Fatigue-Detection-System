@@ -82,6 +82,8 @@ def eye_aspect_ratio(eye):
     A = dist.euclidean(eye[1], eye[5])
     B = dist.euclidean(eye[2], eye[4])
     C = dist.euclidean(eye[0], eye[3])
+    if C == 0:
+        return 0.0
     return (A + B) / (2.0 * C)
 
 def mouth_aspect_ratio(mou):
@@ -90,4 +92,6 @@ def mouth_aspect_ratio(mou):
     Y1 = dist.euclidean(mou[2], mou[10])
     Y2 = dist.euclidean(mou[4], mou[8])
     Y  = (Y1 + Y2) / 2.0
+    if X == 0:
+        return 0.0
     return Y / X
