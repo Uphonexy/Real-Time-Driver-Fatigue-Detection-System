@@ -134,6 +134,7 @@ class DetectionEngine:
 
         self._head_down_start: Optional[float]  = None
         self._distracted_start: Optional[float] = None
+        self._ear_history: list[float]          = []
 
         self._no_face_counter      = 0
         self._consecutive_failures = 0
@@ -241,6 +242,7 @@ class DetectionEngine:
             self._yawn_counted     = False
             self._head_down_start  = None
             self._distracted_start = None
+            self._ear_history.clear()
             _log.info("Detection resumed.")
 
     def stop(self):
@@ -305,6 +307,7 @@ class DetectionEngine:
             self._yawn_start       = None
             self._head_down_start  = None
             self._distracted_start = None
+            self._ear_history.clear()
             return result
 
         effective_drive_minutes = max(0.0, (current_drive_seconds - CALIBRATION_DURATION) / 60)
@@ -393,6 +396,7 @@ class DetectionEngine:
                 self._yawn_status      = False
                 self._head_down_start  = None
                 self._distracted_start = None
+                self._ear_history.clear()
             result.eye_status   = "N/A"
             result.mouth_status = "N/A"
         else:
@@ -411,7 +415,13 @@ class DetectionEngine:
             ear       = (left_ear + right_ear) / 2.0
             mou_ear   = mouth_aspect_ratio(mouth)
 
-            result.ear = ear
+            # Smooth EAR to filter out landmark detection jitter/noise
+            self._ear_history.append(ear)
+            if len(self._ear_history) > 5:
+                self._ear_history.pop(0)
+            smoothed_ear = sum(self._ear_history) / len(self._ear_history)
+
+            result.ear = smoothed_ear
             result.mar = mou_ear
 
             # Collect calibration samples - filter out mid-blinks
@@ -474,7 +484,7 @@ class DetectionEngine:
             else:
                 self._distracted_start = None
 
-            if ear < self._EYE_AR_THRESH:
+            if smoothed_ear < self._EYE_AR_THRESH:
                 result.eye_status = "Closed"
                 cv2.putText(frame, "Eyes Closed",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
@@ -505,7 +515,7 @@ class DetectionEngine:
 
                         if not self._eye_event_logged:
                             self._logger.log_event(
-                                "drowsiness_alarm", drive_minutes, ear,
+                                "drowsiness_alarm", drive_minutes, smoothed_ear,
                                 self._EYE_AR_THRESH, clip_path=clip_path,
                             )
                             self._fire_alert("drowsiness_alarm", "Drowsiness detected", result)
@@ -517,7 +527,7 @@ class DetectionEngine:
                 cv2.putText(frame, "Eyes Open",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-            cv2.putText(frame, f"EAR: {ear:.3f}",
+            cv2.putText(frame, f"EAR: {smoothed_ear:.3f}",
                         (480, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
             cv2.putText(frame, f"T:   {self._EYE_AR_THRESH:.3f}",
                         (480, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 0), 2)
