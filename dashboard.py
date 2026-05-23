@@ -62,7 +62,7 @@ shared_state = {
     "yawns":                   0,
     "drive_seconds":           0.0,
     "calibrating":             True,
-    "calib_remaining":         300,
+    "calib_remaining":         30,
     "paused":                  False,
     "stopped":                 False,
     "ear_thresh":              0.0,

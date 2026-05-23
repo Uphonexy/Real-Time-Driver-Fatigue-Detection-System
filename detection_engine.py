@@ -32,7 +32,7 @@ from clip_recorder import ClipRecorder, cleanup_old_clips
 _log = get_logger("engine")
 
 # ── Tunable constants ─────────────────────────────────────────────────────────
-CALIBRATION_DURATION       = 300   # 5 minutes for production
+CALIBRATION_DURATION       = 30    # 30 seconds for quick setup
 EYE_CLOSED_DURATION_THRESH = 1.5   # seconds before drowsiness alarm
 YAWN_DURATION_THRESH       = 1.5   # seconds of continuous open mouth
 NO_FACE_FRAME_LIMIT        = 90    # frames before "face not detected" banner
